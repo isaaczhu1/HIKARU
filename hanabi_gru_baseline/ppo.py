@@ -9,7 +9,10 @@ def masked_categorical(logits, legal_mask):
     a = dist.sample()
     return a, dist.log_prob(a), dist
 
-def ppo_update(policy, optimizer, storage, cfg):
+
+def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_kl=None):
+    # use override if provided, else fall back to config
+    ent_coef = getattr(cfg.ppo, "ent_coef", 0.0) if ent_coef_override is None else ent_coef_override
     logs = {}
     ent_all, clip_all, pi_all, v_all = [], [], [], []
     for _ in range(cfg.ppo.epochs):
@@ -35,7 +38,8 @@ def ppo_update(policy, optimizer, storage, cfg):
             loss_pi = -(torch.min(surr1, surr2)).mean()
             loss_v = 0.5 * (mb["ret"] - value).pow(2).mean()
             loss_ent = - cfg.ppo.ent_coef * entropy
-            loss = loss_pi + cfg.ppo.vf_coef * loss_v + loss_ent
+            # loss = loss_pi + cfg.ppo.vf_coef * loss_v + loss_ent
+            loss = loss_pi + cfg.ppo.vf_coef * loss_v - ent_coef * entropy
 
             optimizer.zero_grad(set_to_none=True)
             loss.backward()

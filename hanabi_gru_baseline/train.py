@@ -105,7 +105,7 @@ def _reset_indices(env, idxs):
 
 # ---------------------------- One environment step --------------------------- #
 @torch.no_grad()
-def do_step(env, net, device, h0, h1, obs_dict, debug=False):
+def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
     """
     Execute a single time step for all N envs in the vector env.
     Auto-resets any slots with zero-legal before sampling, and post-step for done slots.
@@ -156,7 +156,20 @@ def do_step(env, net, device, h0, h1, obs_dict, debug=False):
     value  = value.squeeze(1)                # [N]
 
     # ----- Sample masked actions -----
-    action, logp, dist = masked_categorical(logits, legal)  # action: [N] long
+    # action, logp, dist = masked_categorical(logits, legal)  # action: [N] long
+    # ----- Sample masked actions (ε-greedy mixture over legal) -----
+    probs = torch.softmax(logits, dim=-1)                  # [N, A]
+    probs = probs * legal                                  # mask illegal
+    probs = probs / probs.sum(dim=1, keepdim=True).clamp_min(1e-8)
+
+    uniform = legal / legal.sum(dim=1, keepdim=True).clamp_min(1e-8)
+
+    mix = (1.0 - eps) * probs + eps * uniform              # [N, A]
+    action = torch.multinomial(mix, num_samples=1).squeeze(1)  # [N]
+
+    # Log-prob under the POLICY (not the mixture) for PPO ratios
+    logp = torch.log(probs.gather(1, action.view(-1, 1)).squeeze(1).clamp_min(1e-8))
+
 
     # ----- Step env -----
     next_obs_dict, rew_np, done_np, trunc_np, info = env.step(action.detach().cpu().numpy())
@@ -276,6 +289,16 @@ def main(cfg: CFG, args):
     # --------------------------- Training loop --------------------------- #
     wall_t0 = time.time()
     for update in range(start_update, total_updates):
+        # ---- LR decay ----
+        progress = (update + 1) / total_updates
+        lr_now = cfg.ppo.lr + (cfg.sched.lr_final - cfg.ppo.lr) * progress
+        for g in opt.param_groups:
+            g["lr"] = lr_now
+
+        # ---- ε-greedy decay (0.02 -> 0) ----
+        eps_decay = min(1.0, (update + 1) / max(1, cfg.sched.eps_decay_until))
+        eps_now = cfg.sched.eps0 * (1.0 - eps_decay)   # goes to 0 by eps_decay_until
+
 
         # Reset rollout buffer cursor
         storage.reset_episode_slice()
@@ -283,9 +306,14 @@ def main(cfg: CFG, args):
         # ---- Rollout collection: T steps ----
         with torch.no_grad():
             for t in range(T):
+                # obs_dict, step_rec, h0, h1, epi = do_step(
+                #     env=env, net=net, device=device,
+                #     h0=h0, h1=h1, obs_dict=obs_dict, debug=args.debug
+                # )
                 obs_dict, step_rec, h0, h1, epi = do_step(
                     env=env, net=net, device=device,
-                    h0=h0, h1=h1, obs_dict=obs_dict, debug=args.debug
+                    h0=h0, h1=h1, obs_dict=obs_dict, debug=args.debug,
+                    eps=eps_now,            # NEW
                 )
                 storage.add(step_rec)
 
@@ -321,12 +349,15 @@ def main(cfg: CFG, args):
         )
 
         # ---- PPO update (masked) ----
-        logs = ppo_update(
-            policy=net,
-            optimizer=opt,
-            storage=storage,
-            cfg=cfg
-        )
+        decay = min(1.0, (update + 1) / max(1, cfg.sched.ent_decay_until))
+        ent_coef_now = cfg.ppo.ent_coef + (cfg.sched.ent_final - cfg.ppo.ent_coef) * decay
+        logs = ppo_update(policy=net, optimizer=opt, storage=storage, cfg=cfg, ent_coef_override=ent_coef_now)
+        # logs = ppo_update(
+        #     policy=net,
+        #     optimizer=opt,
+        #     storage=storage,
+        #     cfg=cfg
+        # )
 
         # Detach hidden banks so graph doesn’t grow across rollouts
         h0 = h0.detach()
