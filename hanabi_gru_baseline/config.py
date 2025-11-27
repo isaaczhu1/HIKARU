@@ -17,21 +17,33 @@ class CFG:
         include_prev_self = False
 
     class ppo:
-        lr = 3e-4              # will decay in code (see below)
+        lr = 1e-4              # will decay in code (see below)
         clip = 0.2
         ent_coef = 0.05        # start high; we’ll anneal
         vf_coef = 0.5
-        epochs = 4             # fine with bigger batch; can go 6–8 later if stable
-        minibatch = 2048       # with N*T=16384 → 8 mini-batches per epoch
+        epochs = 6             # fine with bigger batch; can go 6–8 later if stable
+        minibatch = 1024       # with N*T=16384 → 8 mini-batches per epoch
         gamma = 0.99
         gae_lambda = 0.95
         max_grad_norm = 0.5
+        seq_len = 16
+        value_clip = 0.2
+
 
     # New: simple schedules (used by train.py)
     class sched:
         lr_final = 3e-5        # linear decay end
         ent_final = 0.01       # entropy decay end
-        ent_decay_until = 2000 # updates to reach ent_final
-        eps0 = 0.02            # ε-greedy start
+        ent_decay_until = 200 # updates to reach ent_final
+        eps0 = 0.0            # ε-greedy start
         eps_decay_until = 2000 # updates to reach 0
-        target_kl = 0.01       # PPO early-stop threshold
+        target_kl = 0.02       # PPO early-stop threshold
+
+    class hanabi:
+        players = 2
+        colors = 2       # twoxtwo
+        ranks = 2        # twoxtwo
+        hand_size = 2    # twoxtwo
+        max_information_tokens = 8
+        max_life_tokens = 3
+        random_start_player = False

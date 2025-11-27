@@ -4,18 +4,17 @@
 #
 # Wires together:
 #   - envs.HanabiGym2P   (single-agent self-play over HLE)
-#   - encode.*           (obs + action mapping)
 #   - model.HanabiGRUPolicy (GRU(256) policy/value)
 #   - storage.RolloutStorage (T x N GAE buffer)
 #   - ppo.ppo_update     (masked PPO)
 #   - utils              (seed + ckpt)
 #
-# Key robustness changes:
-#   * Use SyncVectorEnv by default on macOS (HLE + async/fork can hang).
+# Robustness:
+#   * SyncVectorEnv by default on macOS (HLE + async/fork can hang).
 #   * Auto-reset any env slots that are done OR have zero-legal before sampling.
 #   * After env.step, reset done slots immediately so next loop sees valid legals.
 #   * Never assert that legal>0; enforce with resets + a last-resort fallback.
-#   * Coerce dtypes when splicing partial resets to avoid NumPy type surprises.
+#   * Coerce dtypes when splicing partial resets to avoid NumPy surprises.
 # -----------------------------------------------------------------------------
 
 import os
@@ -30,9 +29,8 @@ from config import CFG
 from envs import HanabiGym2P
 from model import HanabiGRUPolicy
 from storage import RolloutStorage
-from ppo import ppo_update, masked_categorical
+from ppo import ppo_update  # masked_categorical not needed (we use ε-greedy mix in-place)
 from utils import seed_everything, save_ckpt, load_ckpt
-
 
 IS_DARWIN = sys.platform == "darwin"
 
@@ -48,21 +46,29 @@ def parse_args():
     ap.add_argument("--debug", action="store_true", help="extra asserts/prints")
     ap.add_argument("--async-env", action="store_true",
                     help="use AsyncVectorEnv (default false on macOS for stability)")
+    ap.add_argument("--variant", type=str, default="twoxtwo",
+                    choices=["twoxtwo", "standard"],
+                    help="Hanabi size preset.")
     return ap.parse_args()
 
 
 # ----------------------------- Vec env factory ------------------------------- #
-def make_vec_env(n_envs: int, seed0: int, obs_conf: str = "minimal", use_async: bool | None = None):
-    """
-    Create a vectorized HanabiGym2P with n_envs independent envs.
-    Default: SyncVectorEnv on macOS to avoid spawn/fork issues in HLE.
-    """
+def make_vec_env(n_envs, seed0, obs_conf="minimal", use_async=None, hanabi_cfg=None):
     def thunk(i):
-        return lambda: HanabiGym2P(seed=seed0 + i, obs_conf=obs_conf)
+        return lambda: HanabiGym2P(
+            seed=seed0 + i,
+            obs_conf=obs_conf,
+            players=hanabi_cfg.players,
+            colors=hanabi_cfg.colors,
+            ranks=hanabi_cfg.ranks,
+            hand_size=hanabi_cfg.hand_size,
+            max_information_tokens=hanabi_cfg.max_information_tokens,
+            max_life_tokens=hanabi_cfg.max_life_tokens,
+            random_start_player=hanabi_cfg.random_start_player,
+        )
 
     if use_async is None:
-        use_async = not IS_DARWIN  # async elsewhere, sync on mac by default
-
+        use_async = not IS_DARWIN
     Vec = AsyncVectorEnv if use_async else SyncVectorEnv
     return Vec([thunk(i) for i in range(n_envs)])
 
@@ -71,17 +77,12 @@ def make_vec_env(n_envs: int, seed0: int, obs_conf: str = "minimal", use_async: 
 def _reset_indices(env, idxs):
     """
     Reset a subset of vectorized envs and return fresh obs_dicts in the same slot order.
-
-    - For AsyncVectorEnv: use env.env_method(...)
-    - For SyncVectorEnv: call env.envs[i].reset() directly
     """
     if not idxs:
         return []
 
     fresh = []
-
-    # AsyncVectorEnv path (has env_method)
-    if hasattr(env, "env_method"):
+    if hasattr(env, "env_method"):  # AsyncVectorEnv
         results = env.env_method("reset", indices=idxs)
         for r in results:
             r0 = r[0] if isinstance(r, tuple) else r
@@ -89,8 +90,7 @@ def _reset_indices(env, idxs):
             fresh.append(r0)
         return fresh
 
-    # SyncVectorEnv path: reset each sub-env directly
-    if hasattr(env, "envs"):
+    if hasattr(env, "envs"):  # SyncVectorEnv
         for i in idxs:
             res = env.envs[i].reset()
             r0 = res[0] if isinstance(res, tuple) else res
@@ -98,7 +98,7 @@ def _reset_indices(env, idxs):
             fresh.append(r0)
         return fresh
 
-    # Fallback: reset all (rare) and pick the ones we need
+    # Fallback: reset all and pick the ones we need (rare)
     all_obs, _ = env.reset()
     return [all_obs[j] for j in idxs]
 
@@ -120,19 +120,17 @@ def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
         fresh = _reset_indices(env, bad_idxs)
         for slot, j in enumerate(bad_idxs):
             new_o = fresh[slot]
-            # Coerce by key to match batch dtypes explicitly
             obs_dict["obs"][j] = new_o["obs"].astype(np.float32, copy=False)
             obs_dict["legal_mask"][j] = new_o["legal_mask"].astype(np.float32, copy=False)
             obs_dict["seat"][j] = np.int64(new_o["seat"])
             obs_dict["prev_other_action"][j] = np.int64(new_o["prev_other_action"])
-        # recompute after patch
         legal_np = obs_dict["legal_mask"]
 
     # ----- Torchify current batch -----
-    obs   = torch.from_numpy(obs_dict["obs"]).to(device).float()           # [N, obs_dim]
-    legal = torch.from_numpy(legal_np).to(device).float()                   # [N, A]
-    seat  = torch.from_numpy(obs_dict["seat"]).to(device).long()            # [N]
-    prev  = torch.from_numpy(obs_dict["prev_other_action"]).to(device).long()  # [N]
+    obs   = torch.from_numpy(obs_dict["obs"]).to(device).float()                # [N, obs_dim]
+    legal = torch.from_numpy(legal_np).to(device).float()                        # [N, A]
+    seat  = torch.from_numpy(obs_dict["seat"]).to(device).long()                 # [N]
+    prev  = torch.from_numpy(obs_dict["prev_other_action"]).to(device).long()    # [N]
 
     # Last-resort safety: if any row is still zero-legal, make action 0 legal
     zero_rows = (legal.sum(dim=1) == 0)
@@ -143,33 +141,28 @@ def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
             print(f"[warn] Forcing a legal action on rows {zr}", flush=True)
 
     # ----- Select per-seat hidden -----
-    h_in = torch.where(seat.view(1, -1, 1) == 0, h0, h1)                    # [1,N,H]
+    h_in = torch.where(seat.view(1, -1, 1) == 0, h0, h1)                         # [1,N,H]
 
     # ----- Forward (seq len 1) -----
     logits, value, h_new = net(
-        obs_vec=obs.unsqueeze(1),            # [N,1,obs_dim]
-        seat=seat.unsqueeze(1),              # [N,1]
-        prev_other=prev.unsqueeze(1),        # [N,1]
-        h=h_in                               # [1,N,H]
+        obs_vec=obs.unsqueeze(1),        # [N,1,obs_dim]
+        seat=seat.unsqueeze(1),          # [N,1]
+        prev_other=prev.unsqueeze(1),    # [N,1]
+        h=h_in                           # [1,N,H]
     )
-    logits = logits.squeeze(1)               # [N, A]
-    value  = value.squeeze(1)                # [N]
+    logits = logits.squeeze(1)           # [N, A]
+    value  = value.squeeze(1)            # [N]
 
-    # ----- Sample masked actions -----
-    # action, logp, dist = masked_categorical(logits, legal)  # action: [N] long
-    # ----- Sample masked actions (ε-greedy mixture over legal) -----
+    # ----- Sample masked actions with ε-greedy mixture over legal -----
     probs = torch.softmax(logits, dim=-1)                  # [N, A]
     probs = probs * legal                                  # mask illegal
     probs = probs / probs.sum(dim=1, keepdim=True).clamp_min(1e-8)
-
     uniform = legal / legal.sum(dim=1, keepdim=True).clamp_min(1e-8)
-
     mix = (1.0 - eps) * probs + eps * uniform              # [N, A]
     action = torch.multinomial(mix, num_samples=1).squeeze(1)  # [N]
 
     # Log-prob under the POLICY (not the mixture) for PPO ratios
     logp = torch.log(probs.gather(1, action.view(-1, 1)).squeeze(1).clamp_min(1e-8))
-
 
     # ----- Step env -----
     next_obs_dict, rew_np, done_np, trunc_np, info = env.step(action.detach().cpu().numpy())
@@ -220,7 +213,9 @@ def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
         "logp": logp.detach(),                   # [N] float
         "value": value.detach(),                 # [N] float
         "reward": torch.from_numpy(rew_np).to(device).float(),               # [N]
-        "done": torch.from_numpy(done_or_trunc.astype(np.float32)).to(device) # [N] {0,1}
+        "done": torch.from_numpy(done_or_trunc.astype(np.float32)).to(device), # [N] {0,1}
+        # New: store pre-forward hidden so storage can serve BPTT sequences later.
+        "h": h_in.squeeze(0).detach(),           # [N, H]
     }
 
     epi = {"done": done_or_trunc, "reward": rew_np}
@@ -237,7 +232,8 @@ def main(cfg: CFG, args):
     os.makedirs(out_dir, exist_ok=True)
 
     # ---------- Environments ---------- #
-    env = make_vec_env(cfg.num_envs, cfg.seed, obs_conf=cfg.obs_mode, use_async=args.async_env)
+    env = make_vec_env(cfg.num_envs, cfg.seed, obs_conf=cfg.obs_mode,
+                       use_async=args.async_env, hanabi_cfg=cfg.hanabi)
     obs_dict, _ = env.reset()  # dict of numpy arrays
     print("[debug] initial legal sums:", obs_dict["legal_mask"].sum(axis=1)[:8])
 
@@ -295,25 +291,20 @@ def main(cfg: CFG, args):
         for g in opt.param_groups:
             g["lr"] = lr_now
 
-        # ---- ε-greedy decay (0.02 -> 0) ----
+        # ---- ε-greedy decay ----
         eps_decay = min(1.0, (update + 1) / max(1, cfg.sched.eps_decay_until))
-        eps_now = cfg.sched.eps0 * (1.0 - eps_decay)   # goes to 0 by eps_decay_until
+        eps_now = cfg.sched.eps0 * (1.0 - eps_decay)  # goes to 0 by eps_decay_until
 
-
-        # Reset rollout buffer cursor
+        # ---- Reset rollout buffer cursor ----
         storage.reset_episode_slice()
 
         # ---- Rollout collection: T steps ----
         with torch.no_grad():
             for t in range(T):
-                # obs_dict, step_rec, h0, h1, epi = do_step(
-                #     env=env, net=net, device=device,
-                #     h0=h0, h1=h1, obs_dict=obs_dict, debug=args.debug
-                # )
                 obs_dict, step_rec, h0, h1, epi = do_step(
                     env=env, net=net, device=device,
-                    h0=h0, h1=h1, obs_dict=obs_dict, debug=args.debug,
-                    eps=eps_now,            # NEW
+                    h0=h0, h1=h1, obs_dict=obs_dict,
+                    debug=args.debug, eps=eps_now
                 )
                 storage.add(step_rec)
 
@@ -352,12 +343,6 @@ def main(cfg: CFG, args):
         decay = min(1.0, (update + 1) / max(1, cfg.sched.ent_decay_until))
         ent_coef_now = cfg.ppo.ent_coef + (cfg.sched.ent_final - cfg.ppo.ent_coef) * decay
         logs = ppo_update(policy=net, optimizer=opt, storage=storage, cfg=cfg, ent_coef_override=ent_coef_now)
-        # logs = ppo_update(
-        #     policy=net,
-        #     optimizer=opt,
-        #     storage=storage,
-        #     cfg=cfg
-        # )
 
         # Detach hidden banks so graph doesn’t grow across rollouts
         h0 = h0.detach()
@@ -386,13 +371,10 @@ def main(cfg: CFG, args):
         # ---- Checkpointing ----
         if (update + 1) % cfg.save_interval == 0:
             ckpt_path = os.path.join(out_dir, f"ckpt_{update+1:06d}.pt")
-
-            # If cfg is a dataclass or object with __dict__, use that; otherwise fall back to dict().
             if hasattr(cfg, "__dict__"):
                 cfg_state = dict(cfg.__dict__)
             else:
                 cfg_state = dict(cfg)
-
             save_ckpt(
                 path=ckpt_path,
                 model_state=net.state_dict(),
@@ -408,15 +390,27 @@ def main(cfg: CFG, args):
 # --------------------------------- Entrypoint -------------------------------- #
 if __name__ == "__main__":
     args = parse_args()
-    cfg = CFG()  # pull defaults from config.py
+    cfg = CFG()
 
-    # Allow quick CLI overrides
+    # CLI overrides
     if args.lr is not None:
         cfg.ppo.lr = args.lr
     if args.total_updates is not None:
         cfg.total_updates = args.total_updates
     if args.save_dir is not None:
         cfg.out_dir = args.save_dir
+
+    # Variant → sizes (requires cfg.hanabi to exist in config.py)
+    if args.variant == "twoxtwo":
+        cfg.hanabi.colors = 2
+        cfg.hanabi.ranks = 2
+        cfg.hanabi.hand_size = 2  # two-by-two means 2-card hands here
+        if args.save_dir is None:
+            cfg.out_dir = os.path.join(cfg.out_dir, "twoxtwo")
+    else:  # standard 5x5
+        cfg.hanabi.colors = 5
+        cfg.hanabi.ranks = 5
+        cfg.hanabi.hand_size = 5
 
     # On macOS, default to SyncVectorEnv unless user explicitly asks for async
     if IS_DARWIN and not args.async_env:
