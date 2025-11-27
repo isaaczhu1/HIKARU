@@ -105,9 +105,30 @@ def test_blueprint_hints_immediate_partner_play(blueprint: HeuristicBlueprint) -
         legal_moves=legal_moves,
     )
     move = blueprint.act(obs)
-    assert move.type() in {pyhanabi.HanabiMoveType.REVEAL_COLOR, pyhanabi.HanabiMoveType.REVEAL_RANK}
-    covered = move.type() == pyhanabi.HanabiMoveType.REVEAL_COLOR and move.color() == pyhanabi.color_char_to_idx("G")
-    assert covered  # prefer the direct color hint for playable card
+    assert move.type() == pyhanabi.HanabiMoveType.REVEAL_COLOR
+    assert move.color() == pyhanabi.color_char_to_idx("G")
+
+
+def test_blueprint_prefers_missing_attribute_hint(blueprint: HeuristicBlueprint) -> None:
+    hand_knowledge = [{"color": None, "rank": None} for _ in range(2)]
+    partner_hand = [
+        {"color": "G", "rank": 0},
+        {"color": "R", "rank": 1},
+    ]
+    partner_knowledge = [
+        {"color": "G", "rank": None},  # already knows color
+        {"color": None, "rank": None},
+    ]
+    legal_moves = [
+        pyhanabi.HanabiMove.get_play_move(0),
+        pyhanabi.HanabiMove.get_discard_move(0),
+        color_hint("G"),
+        rank_hint(0),
+    ]
+    obs = make_observation(hand_knowledge, partner_hand, partner_knowledge, legal_moves=legal_moves)
+    move = blueprint.act(obs)
+    assert move.type() == pyhanabi.HanabiMoveType.REVEAL_RANK
+    assert move.rank() == 0
 
 
 def test_blueprint_discards_known_useless(blueprint: HeuristicBlueprint) -> None:
