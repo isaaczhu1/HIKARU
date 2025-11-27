@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from statistics import mean, pstdev
 from typing import Callable, Dict, List
 
-from envs.full_hanabi_env import FullHanabiEnv, _move_to_action_dict
+from envs.full_hanabi_env import FullHanabiEnv, HanabiObservation, _move_to_action_dict
 
 
 @dataclass
@@ -54,7 +54,7 @@ def run_self_play(
         while not done:
             pid = env.current_player()
             observation = env.observation_for_player(pid)
-            action = blueprints[pid].act(observation)
+            action = self_play_action(blueprints[pid], env, pid, observation)
             _, _, done, info = env.step(action)
             if episode < log_episodes:
                 rule = getattr(blueprints[pid], "last_rule", lambda: None)
@@ -78,6 +78,12 @@ def run_self_play(
             stats.append({})
 
     return EvaluationResult(scores=scores, blueprint_stats=stats)
+
+
+def self_play_action(agent, env: FullHanabiEnv, player_id: int, observation: HanabiObservation):
+    if hasattr(agent, "act_with_env"):
+        return agent.act_with_env(env, player_id, observation)
+    return agent.act(observation)
 
 
 __all__ = ["run_self_play", "EvaluationResult"]
