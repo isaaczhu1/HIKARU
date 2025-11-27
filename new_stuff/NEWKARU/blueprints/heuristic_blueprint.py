@@ -98,20 +98,40 @@ class HeuristicBlueprint:
         if not playable_indices:
             return None
 
+        partner_knowledge = obs.card_knowledge[1]
         best_choice: Optional[pyhanabi.HanabiMove] = None
-        best_score: Optional[int] = None
+        best_key: Optional[tuple] = None
+
         for move, move_dict in zip(obs.legal_moves, obs.legal_moves_dict):
             if not self._is_partner_hint(move_dict):
                 continue
             covered = self._hint_covered_indices(obs, move_dict)
             if not covered:
                 continue
-            if not any(index in playable_indices for index in covered):
-                continue
-            score = len(covered)
-            if best_score is None or score < best_score:
-                best_choice = move
-                best_score = score
+
+            move_type = move_dict["action_type"]
+            for idx in covered:
+                if idx not in playable_indices:
+                    continue
+                knowledge = partner_knowledge[idx]
+                needs_color = knowledge.get("color") is None
+                needs_rank = knowledge.get("rank") is None
+
+                if not needs_color and not needs_rank:
+                    continue
+
+                reveals_color = move_type == "REVEAL_COLOR"
+                reveals_rank = move_type == "REVEAL_RANK"
+                if reveals_color and not needs_color:
+                    continue
+                if reveals_rank and not needs_rank:
+                    continue
+
+                priority = 0 if reveals_color else 1
+                key = (priority, len(covered))
+                if best_key is None or key < best_key:
+                    best_choice = move
+                    best_key = key
         return best_choice
 
     def _discard_known_useless(self, obs: HanabiObservation) -> Optional[pyhanabi.HanabiMove]:
