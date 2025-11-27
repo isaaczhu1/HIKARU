@@ -1,25 +1,6 @@
 # envs.py
 # -----------------------------------------------------------------------------
 # HanabiGym2P over DeepMind rl_env.HanabiEnv (2 players), observation-driven.
-#
-# This version:
-# - Does NOT require env.state or env.game. It reads everything from the
-#   rl_env observation dicts returned by reset()/step().
-# - Legal moves come from obs["player_observations"][seat]["legal_moves"].
-# - Fixed action id template: [PLAY 0..H-1][DISCARD 0..H-1][REVEAL_COLOR 0..C-1][REVEAL_RANK 0..R-1].
-# - "obs" feature vector: if a pyhanabi state isn’t exposed, we emit zeros
-#   (so training runs end-to-end). If you want rich features, we can later
-#   swap in an encoder built from the rl_env observation dict.
-#
-# Observation dict (to the agent):
-#   {
-#     "obs": float32[obs_dim],          # zeros if pyhanabi state isn't available
-#     "legal_mask": float32[num_moves], # 0/1 mask over global action ids
-#     "seat": int {0,1},                # current acting seat
-#     "prev_other_action": int in [0..num_moves]  # num_moves = sentinel "none"
-#   }
-#
-# Reward: +1 only when score increases (successful play).
 # -----------------------------------------------------------------------------
 
 from __future__ import annotations
@@ -36,66 +17,63 @@ _DEBUG = bool(int(os.environ.get("HANABI_DEBUG", "0")))
 class HanabiGym2P(gym.Env):
     metadata = {"render_modes": []}
 
-    def __init__(
-        self,
-        colors: int = 5,
-        ranks: int = 5,
-        players: int = 2,
-        hand_size: int = 5,
-        seed: int = 0,
-        obs_conf: str = "minimal",
-        reward_mode: str = "play_plus_one",
-        include_touched_flags: bool = True,
-    ):
-        assert players == 2, "This baseline supports exactly 2 players."
-
+    def __init__(self, seed, obs_conf,
+                 players=2, colors=5, ranks=5, hand_size=5,
+                 max_information_tokens=8, max_life_tokens=3,
+                 random_start_player=False):
+        self.players = players
         self.colors = colors
         self.ranks = ranks
-        self.players = players
         self.hand_size = hand_size
-        self.seed = seed
-        self.obs_conf = obs_conf
-        self.reward_mode = reward_mode
 
-        # Fixed global action count
-        self.num_moves = 2 * hand_size + colors + ranks
-
-        # Build rl_env (handles CHANCE internally)
-        self.env = rl_env.HanabiEnv({
+        # Underlying DeepMind rl_env
+        self._env = rl_env.HanabiEnv(config={
+            "players": players,
             "colors": colors,
             "ranks": ranks,
-            "players": players,
             "hand_size": hand_size,
-            "max_information_tokens": 8,
-            "max_life_tokens": 3,
-            # minimal vs card_knowledge doesn't change rl_env outputs we use here
-            "observation_type": 0,  # rl_env uses its own obs dict anyway
+            "max_information_tokens": max_information_tokens,
+            "max_life_tokens": max_life_tokens,
+            "random_start_player": random_start_player,
             "seed": seed,
         })
-
-        # Trackers
-        self.prev_action = [-1 for _ in range(players)]  # last action by seat
-        self.turn_count = 0
-        self._last_obs = None      # last rl_env observation dict
-        self._last_score = 0       # to shape +1 on successful play
-
-        # Observation space: use a small placeholder vector for now (221 is typical obs_dim; set 1 to be conservative)
+        # --- probe real vectorized obs length once, set stable obs space ---
         obs_dim = 1
-        self.observation_space = spaces.Dict(
-            {
-                "obs": spaces.Box(-np.inf, np.inf, (obs_dim,), dtype=np.float32),
-                "legal_mask": spaces.Box(0.0, 1.0, (self.num_moves,), dtype=np.float32),
-                "seat": spaces.Discrete(players),
-                "prev_other_action": spaces.Discrete(self.num_moves + 1),
-            }
-        )
-        self.action_space = spaces.Discrete(self.num_moves)
+        try:
+            _probe = self._env.reset()
+            _seat = int(_probe.get("current_player", 0))
+            _pov = _probe["player_observations"][_seat]
+            _vec = np.asarray(_pov.get("vectorized", []), dtype=np.float32)
+            if _vec.ndim == 1 and _vec.size > 0:
+                obs_dim = int(_vec.size)
+        except Exception:
+            pass
 
-        # Touch flags (kept for interface; not used in this minimal rl_env path)
-        self._touched = [np.zeros((hand_size, 2), dtype=np.float32) for _ in range(players)] if include_touched_flags else None
 
-        # Produce an initial obs to validate wiring
-        _ = self._reset_world(seed)
+        # --- dynamic action layout ---
+        self._a_play0         = 0
+        self._a_discard0      = self._a_play0 + hand_size
+        self._a_reveal_color0 = self._a_discard0 + hand_size
+        self._a_reveal_rank0  = self._a_reveal_color0 + colors
+
+        self.num_moves = 2 * hand_size + colors + ranks
+        self.sentinel_none = self.num_moves  # <-- sentinel for "no previous action"
+
+        # Placeholder obs_dim; we’ll update after first reset() based on rl_env's vectorized features
+        obs_dim = 1
+        self.observation_space = gym.spaces.Dict({
+            "obs": gym.spaces.Box(-np.inf, np.inf, shape=(obs_dim,), dtype=np.float32),
+            "legal_mask": gym.spaces.Box(0.0, 1.0, shape=(self.num_moves,), dtype=np.float32),
+            "seat": gym.spaces.Discrete(players),
+            "prev_other_action": gym.spaces.Discrete(self.num_moves + 1),
+        })
+        self.action_space = gym.spaces.Discrete(self.num_moves)
+
+        # Runtime state
+        self._last_obs = None
+        self._last_score = 0
+        self.prev_action = [self.sentinel_none for _ in range(self.players)]  # per-seat last action id
+        self.turn_count = 0
 
     # ----------------------------- Utilities -------------------------------- #
     @staticmethod
@@ -103,13 +81,26 @@ class HanabiGym2P(gym.Env):
         return int(obs.get("current_player", 0))
 
     def _score_from_obs(self, obs: dict) -> int:
-        # rl_env obs does not always carry score directly; we can derive from fireworks stacks in player obs
-        # Use the current player's view for simplicity:
+        """
+        Score = sum of highest ranks on fireworks stacks.
+        rl_env exposes fireworks as a dict: color -> highest rank (0..R or 1..R depending on build).
+        We normalize to integers and sum directly (no +1 offset).
+        """
         p = self._seat_from_obs(obs)
         pov = obs["player_observations"][p]
-        # fireworks is dict color->highest rank played (0..4). Score is sum of (rank+1) across colors.
         fw = pov.get("fireworks", {})
-        return int(sum(int(v) + 1 for v in fw.values()))
+        # Accept either 0- or 1-based, clamp into [0, ranks]
+        total = 0
+        for v in fw.values():
+            try:
+                iv = int(v)
+            except Exception:
+                iv = 0
+            if 1 <= iv <= self.ranks:
+                total += iv
+            elif 0 <= iv <= self.ranks:
+                total += iv
+        return int(total)
 
     def _legal_moves_from_obs(self, obs: dict):
         p = self._seat_from_obs(obs)
@@ -126,11 +117,9 @@ class HanabiGym2P(gym.Env):
         if isinstance(c, int):
             return max(0, min(c, self.colors - 1))
         s = str(c).strip().lower()
-        # single-letter codes
         letter_map = {"r": 0, "y": 1, "g": 2, "b": 3, "w": 4}
         if s in letter_map:
             return max(0, min(letter_map[s], self.colors - 1))
-        # full names (just in case)
         name_map = {"red": 0, "yellow": 1, "green": 2, "blue": 3, "white": 4}
         if s in name_map:
             return max(0, min(name_map[s], self.colors - 1))
@@ -139,83 +128,84 @@ class HanabiGym2P(gym.Env):
     def _parse_rank(self, r) -> int:
         """Map rl_env rank payloads ('1'..'5' or ints 0..4/1..5) -> 0..ranks-1."""
         if isinstance(r, int):
-            # Some builds already use 0-based; some 1-based. Clamp either way.
-            if 0 <= r < self.ranks:
+            if 0 <= r < self.ranks:  # already 0-based
                 return r
-            if 1 <= r <= self.ranks:
+            if 1 <= r <= self.ranks:  # 1-based
                 return r - 1
             return max(0, min(r, self.ranks - 1))
         s = str(r).strip()
         if s.isdigit():
             v = int(s)
-            # Assume 1-based in strings
             return max(0, min(v - 1, self.ranks - 1))
         return 0
 
+    # id -> rl and rl -> id now use the dynamic bases above
+    def _id_from_rl_action(self, a):
+        t = self._act_type(a)
+        if t == "PLAY":
+            return self._a_play0 + int(a["card_index"])
+        if t == "DISCARD":
+            return self._a_discard0 + int(a["card_index"])
+        if t == "REVEAL_COLOR":
+            # rl_env color is typically 0..colors-1 (or a letter); handle both
+            return self._a_reveal_color0 + self._parse_color(a.get("color", 0))
+        if t == "REVEAL_RANK":
+            # rl_env rank is usually 1..ranks
+            rank1 = int(a.get("rank", 1))
+            return self._a_reveal_rank0 + (rank1 - 1)
+        raise ValueError(f"Unknown action dict: {a}")
 
-    def _id_from_rl_action(self, a: dict) -> int:
-        at = a.get("action_type", "")
-        ats = str(at).upper()
-        if "PLAY" in ats:
-            return self._id_for_play(int(a.get("card_index", 0)))
-        if "DISCARD" in ats:
-            return self._id_for_discard(int(a.get("card_index", 0)))
-        if "REVEAL" in ats and "COLOR" in ats:
-            c = self._parse_color(a.get("color", 0))
-            return self._id_for_reveal_color(c)
-        if "REVEAL" in ats and "RANK" in ats:
-            r = self._parse_rank(a.get("rank", 0))
-            return self._id_for_reveal_rank(r)
-        # fallback
-        return 0
-
+    def _rl_action_from_id(self, gid):
+        if gid < self._a_discard0:
+            return {"type": "PLAY", "card_index": gid - self._a_play0}
+        if gid < self._a_reveal_color0:
+            return {"type": "DISCARD", "card_index": gid - self._a_discard0}
+        if gid < self._a_reveal_rank0:
+            return {"type": "REVEAL_COLOR", "color": gid - self._a_reveal_color0}
+        return {"type": "REVEAL_RANK", "rank": (gid - self._a_reveal_rank0) + 1}
 
     def _rl_action_matches_id(self, a: dict, gid: int) -> bool:
         H, C, R = self.hand_size, self.colors, self.ranks
-        # Validate bucket + index
-        if 0 <= gid < H:  # PLAY
-            return "card_index" in a and self._id_from_rl_action(a) == gid
-        if H <= gid < 2 * H:  # DISCARD
-            return "card_index" in a and self._id_from_rl_action(a) == gid
-        if 2 * H <= gid < 2 * H + C:  # REVEAL_COLOR
-            return "color" in a and self._id_from_rl_action(a) == gid
-        if 2 * H + C <= gid < 2 * H + C + R:  # REVEAL_RANK
-            return "rank" in a and self._id_from_rl_action(a) == gid
-        return False
+        t = self._act_type(a)
+        if t is None:
+            return False
+
+        # Quick range check per bucket
+        if 0 <= gid < H:
+            if t != "PLAY" or "card_index" not in a:
+                return False
+        elif H <= gid < 2 * H:
+            if t != "DISCARD" or "card_index" not in a:
+                return False
+        elif 2 * H <= gid < 2 * H + C:
+            if t != "REVEAL_COLOR":
+                return False
+        elif 2 * H + C <= gid < 2 * H + C + R:
+            if t != "REVEAL_RANK":
+                return False
+        else:
+            return False
+
+        # Final exact id match
+        return self._id_from_rl_action(a) == gid
+
 
     # ------------------------------- Gym API -------------------------------- #
     def _reset_world(self, seed=None):
-        # Some rl_env builds accept seed=..., others don't.
         try:
-            obs = self.env.reset(seed=seed) if seed is not None else self.env.reset()
+            obs = self._env.reset(seed=seed) if seed is not None else self._env.reset()
         except TypeError:
-            obs = self.env.reset()
+            obs = self._env.reset()
 
         self._last_obs = obs
         self._last_score = self._score_from_obs(obs)
-        self.prev_action = [-1 for _ in range(self.players)]
+        self.prev_action = [self.sentinel_none for _ in range(self.players)]
         self.turn_count = 0
-        if self._touched is not None:
-            for s in range(self.players):
-                self._touched[s].fill(0.0)
-
-        # --- NEW: infer obs_dim from rl_env vectorized features and update space once
-        try:
-            seat = self._seat_from_obs(obs)
-            pov = obs["player_observations"][seat]
-            vec = np.asarray(pov.get("vectorized", []), dtype=np.float32)
-            if vec.ndim == 1 and vec.size > 0:
-                current_dim = self.observation_space["obs"].shape[0]
-                if current_dim != vec.size:
-                    # Update obs space to the real feature size
-                    self.observation_space["obs"] = gym.spaces.Box(
-                        -np.inf, np.inf, (vec.size,), dtype=np.float32
-                    )
-        except Exception:
-            pass
-
         return obs
 
+    def _act_type(self, a: dict) -> str:
+        """Return action type string from rl_env action dict."""
+        return a.get("action_type", a.get("type", None))
 
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
@@ -226,7 +216,7 @@ class HanabiGym2P(gym.Env):
         # Build legal mask from last obs; choose matching action dict
         legal = self._legal_moves_from_obs(self._last_obs)
         if not legal:
-            # Unexpected with rl_env; do a defensive reset
+            # Defensive reset (should be rare)
             obs = self._reset_world()
             return self._pack_obs(obs), 0.0, False, False, {}
 
@@ -238,17 +228,17 @@ class HanabiGym2P(gym.Env):
         if choice is None:
             choice = legal[0]
 
-        # Shaped reward: +1 per score increase
+        # Reward shaping: +1 if score increases after the action
         score_before = self._last_score
-
-        next_obs, env_rew, done, info = self.env.step(choice)
+        next_obs, env_rew, done, info = self._env.step(choice)
         self._last_obs = next_obs
         score_after = self._score_from_obs(next_obs)
         self._last_score = score_after
 
-        shaped = float(max(0, score_after - score_before)) if self.reward_mode == "play_plus_one" else float(env_rew)
+        shaped = float(max(0, score_after - score_before))
 
-        # prev action bookkeeping
+        # prev action bookkeeping:
+        # After env.step, current player is seat_now; the player who just acted is prev seat.
         seat_now = self._seat_from_obs(next_obs)
         just_acted = (seat_now - 1) % self.players
         if 0 <= just_acted < self.players:
@@ -263,14 +253,12 @@ class HanabiGym2P(gym.Env):
     def _pack_obs(self, obs: dict) -> dict:
         seat = self._seat_from_obs(obs)
 
-        # --- Use DeepMind's full vectorized observation for the current player
+        # Use DeepMind's vectorized observation for the current player; pad/trim if needed
         try:
             pov = obs["player_observations"][seat]
             obs_vec = np.asarray(pov.get("vectorized", []), dtype=np.float32)
             if obs_vec.ndim != 1 or obs_vec.size == 0:
-                # fallback to zeros if not present
                 obs_vec = np.zeros((self.observation_space["obs"].shape[0],), dtype=np.float32)
-            # If rl_env suddenly changes size mid-run (shouldn't), pad/trim safely
             target = self.observation_space["obs"].shape[0]
             if obs_vec.size != target:
                 if obs_vec.size > target:
@@ -280,10 +268,9 @@ class HanabiGym2P(gym.Env):
                     pad[:obs_vec.size] = obs_vec
                     obs_vec = pad
         except Exception:
-            # very defensive fallback
             obs_vec = np.zeros((self.observation_space["obs"].shape[0],), dtype=np.float32)
 
-        # --- Legal mask from rl_env legal moves
+        # Legal mask from rl_env legal moves
         legal_mask = np.zeros((self.num_moves,), dtype=np.float32)
         try:
             for a in self._legal_moves_from_obs(obs):
@@ -293,14 +280,12 @@ class HanabiGym2P(gym.Env):
         except Exception:
             pass
 
-        # --- Previous action by the opponent
+        # Previous action by the opponent (already sentinel-initialized on first move)
         prev_other = self.prev_action[(seat + 1) % self.players]
-        if prev_other < 0:
-            prev_other = self.num_moves
 
         return {
             "obs": obs_vec,
             "legal_mask": legal_mask,
             "seat": int(seat),
-            "prev_other_action": int(prev_other),
+            "prev_other_action": int(prev_other),  # <-- sentinel_none on first move
         }
