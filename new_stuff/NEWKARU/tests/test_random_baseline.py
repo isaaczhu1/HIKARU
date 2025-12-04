@@ -2,8 +2,23 @@ from __future__ import annotations
 
 from hanabi_learning_environment import pyhanabi
 
+# add ./new_stuff/NEWKARU to sys.path for imports
+import os
+import sys
+path_string = "/Users/isaaczhu/MIT/25-26/HIKARU/new_stuff/NEWKARU"
+sys.path.append(os.path.abspath(path_string))
+
+
 from blueprints.random_baseline import RandomHintDiscardBlueprint
-from envs.full_hanabi_env import HanabiObservation, _move_to_action_dict
+
+try:
+    from envs.full_hanabi_env import HanabiObservation, _move_to_action_dict
+except ImportError:
+    # import from new_stuff/NEWKARU if envs/ is not available
+    import sys
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parents[3]))
+    from envs.full_hanabi_env import HanabiObservation, _move_to_action_dict
 
 
 def make_obs(info_tokens: int = 1) -> HanabiObservation:

@@ -1,6 +1,13 @@
 """Smoke test to ensure hanabi_learning_environment is installed and usable."""
 from __future__ import annotations
 
+
+# add ./new_stuff/NEWKARU to sys.path for imports
+import os
+import sys
+path_string = "/Users/isaaczhu/MIT/25-26/HIKARU/new_stuff/NEWKARU"
+sys.path.append(os.path.abspath(path_string))
+
 import argparse
 import random
 from typing import Tuple
