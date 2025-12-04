@@ -26,7 +26,7 @@ import torch
 from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv
 
 from config import CFG
-from envs import HanabiGym2P
+from hanabi_envs import HanabiGym2P
 from model import HanabiGRUPolicy
 from storage import RolloutStorage
 from ppo import ppo_update  # masked_categorical not needed (we use ε-greedy mix in-place)

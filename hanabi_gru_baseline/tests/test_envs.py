@@ -66,7 +66,7 @@ if "hanabi_learning_environment" not in sys.modules:  # pragma: no branch
 else:  # pragma: no cover
     sys.modules["hanabi_learning_environment.rl_env"].HanabiEnv = _FakeHanabiEnv
 
-from hanabi_gru_baseline.envs import HanabiGym2P  # noqa: E402  (after stubbing)
+from hanabi_gru_baseline.hanabi_envs import HanabiGym2P  # noqa: E402  (after stubbing)
 
 
 def test_observation_space_matches_vector_length():
