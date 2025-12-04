@@ -1,4 +1,4 @@
-from envs import HanabiGym2P
+from hanabi_envs import HanabiGym2P
 import numpy as np
 
 e = HanabiGym2P(seed=0, obs_conf="minimal")

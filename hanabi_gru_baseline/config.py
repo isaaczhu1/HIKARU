@@ -26,7 +26,7 @@ class CFG:
         gamma = 0.99
         gae_lambda = 0.95
         max_grad_norm = 0.5
-        seq_len = 16
+        seq_len = 1            # disable recurrent PPO until rollout/train hidden usage match
         value_clip = 0.2
 
 
