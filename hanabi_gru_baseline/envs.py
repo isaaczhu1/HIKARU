@@ -58,9 +58,8 @@ class HanabiGym2P(gym.Env):
 
         self.num_moves = 2 * hand_size + colors + ranks
         self.sentinel_none = self.num_moves  # <-- sentinel for "no previous action"
+        self._hint_target_offset = 1 if players > 1 else 0
 
-        # Placeholder obs_dim; we’ll update after first reset() based on rl_env's vectorized features
-        obs_dim = 1
         self.observation_space = gym.spaces.Dict({
             "obs": gym.spaces.Box(-np.inf, np.inf, shape=(obs_dim,), dtype=np.float32),
             "legal_mask": gym.spaces.Box(0.0, 1.0, shape=(self.num_moves,), dtype=np.float32),
@@ -157,12 +156,20 @@ class HanabiGym2P(gym.Env):
 
     def _rl_action_from_id(self, gid):
         if gid < self._a_discard0:
-            return {"type": "PLAY", "card_index": gid - self._a_play0}
+            return {"action_type": "PLAY", "card_index": gid - self._a_play0}
         if gid < self._a_reveal_color0:
-            return {"type": "DISCARD", "card_index": gid - self._a_discard0}
+            return {"action_type": "DISCARD", "card_index": gid - self._a_discard0}
         if gid < self._a_reveal_rank0:
-            return {"type": "REVEAL_COLOR", "color": gid - self._a_reveal_color0}
-        return {"type": "REVEAL_RANK", "rank": (gid - self._a_reveal_rank0) + 1}
+            return {
+                "action_type": "REVEAL_COLOR",
+                "color": gid - self._a_reveal_color0,
+                "target_offset": self._hint_target_offset,
+            }
+        return {
+            "action_type": "REVEAL_RANK",
+            "rank": (gid - self._a_reveal_rank0) + 1,
+            "target_offset": self._hint_target_offset,
+        }
 
     def _rl_action_matches_id(self, a: dict, gid: int) -> bool:
         H, C, R = self.hand_size, self.colors, self.ranks
