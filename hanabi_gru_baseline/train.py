@@ -32,6 +32,8 @@ from storage import RolloutStorage
 from ppo import ppo_update  # masked_categorical not needed (we use ε-greedy mix in-place)
 from utils import seed_everything, save_ckpt, load_ckpt
 
+from torch.utils.tensorboard import SummaryWriter
+
 IS_DARWIN = sys.platform == "darwin"
 
 
@@ -237,6 +239,9 @@ def main(cfg: CFG, args):
     obs_dict, _ = env.reset()  # dict of numpy arrays
     print("[debug] initial legal sums:", obs_dict["legal_mask"].sum(axis=1)[:8])
 
+    # ---------- tensorboard logging ---------- #
+    tb_writer = SummaryWriter(log_dir="tb/" + out_dir)
+
     # Infer dimensions from first observation
     obs_dim   = obs_dict["obs"].shape[-1]
     num_moves = obs_dict["legal_mask"].shape[-1]
@@ -367,6 +372,16 @@ def main(cfg: CFG, args):
                 f"clipfrac={logs['clip_frac']:.2f} "
                 f"fps~{fps}"
             )
+
+
+            # Tensorboard logging
+            tb_writer.add_scalar('charts/ep_return_mean', ep_return_mean, global_env_steps)
+            tb_writer.add_scalar('charts/ep_return_med', ep_return_med, global_env_steps)
+            tb_writer.add_scalar('losses/loss_pi', logs['loss_pi'], global_env_steps)
+            tb_writer.add_scalar('losses/loss_v', logs['loss_v'], global_env_steps)
+            tb_writer.add_scalar('losses/entropy', logs['entropy'], global_env_steps)
+            tb_writer.add_scalar('losses/clip_frac', logs['clip_frac'], global_env_steps)
+            tb_writer.flush()
 
         # ---- Checkpointing ----
         if (update + 1) % cfg.save_interval == 0:
