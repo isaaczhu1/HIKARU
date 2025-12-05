@@ -1,5 +1,8 @@
+# storage.py
+
 import numpy as np
 import torch
+
 
 class RolloutStorage:
     """
@@ -7,6 +10,12 @@ class RolloutStorage:
     Shapes: [T, N, ...]
     Stores: obs, legal, seat, prev_other, action, logp, value, reward, done, adv, ret
     Optional: pre-forward GRU hidden per step as h[t, n, H] if provided.
+
+    Conventions:
+      - obs[t, n] is the observation *before* taking action[t, n].
+      - h[t, n] is the GRU hidden state for the acting seat in env n
+        *before* forwarding obs[t, n] through the network (i.e., the h_in
+        that produced logits/value/logp for that step).
     """
     def __init__(self, T: int, N: int, obs_dim: int, num_actions: int, device: torch.device):
         self.T, self.N = T, N
@@ -39,7 +48,7 @@ class RolloutStorage:
     def add(self, d: dict):
         """
         Append one time step worth of data for all N envs.
-        Expected keys (same as before): obs, legal, seat, prev_other, action, logp, value, reward, done
+        Expected keys: obs, legal, seat, prev_other, action, logp, value, reward, done.
         Optional key: "h" (pre-forward hidden for current step) with shape [N, H] or [1, N, H].
         """
         t = self.ptr
@@ -96,8 +105,21 @@ class RolloutStorage:
         """
         Yields flattened minibatches of size ~batch_size (last may be smaller).
         Each field is shaped [B,...] where B = T*N.
+
+        Returned dict keys:
+          - obs:       [B, obs_dim]
+          - legal:     [B, A]
+          - seat:      [B]
+          - prev_other:[B]
+          - act:       [B]
+          - logp_old:  [B]
+          - val_old:   [B]
+          - adv:       [B]
+          - ret:       [B]
+          - h0:        [B, H]  (if hidden was recorded; else omitted)
         """
-        B = self.T * self.N
+        T, N = self.T, self.N
+        B = T * N
 
         def flat(x):
             return x.reshape(B, *x.shape[2:])
@@ -112,10 +134,14 @@ class RolloutStorage:
         flat_adv   = flat(self.adv)
         flat_ret   = flat(self.ret)
 
+        flat_h = None
+        if self.h is not None:
+            flat_h = flat(self.h)  # [B, H]
+
         idx = torch.randperm(B, device=self.dev)
         for i in range(0, B, batch_size):
             j = idx[i:i + batch_size]
-            yield dict(
+            mb = dict(
                 obs=flat_obs[j],
                 legal=flat_legal[j],
                 seat=flat_seat[j],
@@ -126,11 +152,15 @@ class RolloutStorage:
                 adv=flat_adv[j],
                 ret=flat_ret[j],
             )
+            if flat_h is not None:
+                mb["h0"] = flat_h[j]  # [B, H]
+            yield mb
 
     # ---------------------- Recurrent (sequence) API ------------------------- #
     def iter_sequence_minibatches(self, seq_len: int, batch_size: int):
         """
-        Yield sequence minibatches for recurrent PPO / BPTT.
+        Yield sequence minibatches for recurrent PPO / BPTT, constructed per (env, seat).
+
         Each item is a dict with tensors shaped:
           - obs:        [B, L, obs_dim]
           - legal:      [B, L, A]
@@ -142,44 +172,71 @@ class RolloutStorage:
           - adv:        [B, L]
           - ret:        [B, L]
           - h0:         [B, H]    (initial GRU hidden *before* the first step in each sequence)
-        Notes:
-          * We drop the final partial chunk if T % L != 0 (keeps shapes simple).
-          * If no hidden was stored, h0 is returned as zeros.
+
+        Construction:
+          * For each env n and each seat s appearing in self.seat[:, n], collect the
+            indices t where seat[t, n] == s. These indices define that seat's timeline.
+          * Chunk that timeline into non-overlapping segments of length L = seq_len:
+               idx_s = [t0, t1, ..., t_{K-1}]  → segments [t0..t_{L-1}], [t_L..t_{2L-1}], ...
+          * Each such segment becomes one sequence. We gather obs/legal/etc. at those
+            (t, n) pairs, and take h0 from self.h[t0, n] if available (else zeros).
         """
-        T, N, L = self.T, self.N, int(seq_len)
+        T, N = self.T, self.N
+        L = int(seq_len)
         assert L >= 1, "seq_len must be >= 1"
 
-        # number of full sequences per env
-        S_per_env = T // L
-        if S_per_env == 0:
+        # No hidden recorded: we can still build sequences, but h0 will be zeros
+        has_h = self.h is not None
+        H = self._h_size if has_h else 0
+
+        # Collect all sequences across (env, seat)
+        seq_t_indices = []  # list of [L] LongTensors (time indices)
+        seq_env_ids   = []  # list of env ids (int)
+        # seats will be gathered from self.seat later
+
+        for n in range(N):
+            # Unique seat values in this env's trajectory (usually {0,1})
+            seat_vals = torch.unique(self.seat[:, n])
+            for s_val in seat_vals.tolist():
+                # Indices where this seat was acting in env n
+                mask = (self.seat[:, n] == s_val)
+                idx = mask.nonzero(as_tuple=False).squeeze(-1)  # [K] or []
+                if idx.numel() < L:
+                    continue
+                # Non-overlapping chunks of length L along this seat's own timeline
+                num_full = idx.numel() // L
+                if num_full <= 0:
+                    continue
+                for j in range(num_full):
+                    start = j * L
+                    end = start + L
+                    t_seq = idx[start:end]  # [L]
+                    seq_t_indices.append(t_seq)
+                    seq_env_ids.append(n)
+
+        S = len(seq_t_indices)
+        if S == 0:
             return  # nothing to yield
 
-        # Build index list of (t0, n) for each sequence
-        starts_t = torch.arange(0, S_per_env * L, L, device=self.dev)  # [S_per_env]
-        env_ids  = torch.arange(N, device=self.dev)                    # [N]
-        # Mesh to all (t0, n) pairs
-        t0_grid  = starts_t.view(-1, 1).repeat(1, N)                   # [S_per_env, N]
-        n_grid   = env_ids.view(1, -1).repeat(S_per_env, 1)            # [S_per_env, N]
-
-        # Flatten to [S] where S = S_per_env * N
-        t0_flat = t0_grid.reshape(-1)
-        n_flat  = n_grid.reshape(-1)
-        S = t0_flat.numel()
+        # Stack into tensors on device
+        t_seq_mat = torch.stack(seq_t_indices, dim=0).to(self.dev)  # [S, L]
+        env_ids   = torch.tensor(seq_env_ids, device=self.dev, dtype=torch.long)  # [S]
 
         # Shuffle sequence order
         perm = torch.randperm(S, device=self.dev)
-        t0_flat = t0_flat[perm]
-        n_flat  = n_flat[perm]
+        t_seq_mat = t_seq_mat[perm]
+        env_ids   = env_ids[perm]
 
-        # Helper to gather a [S, L, ...] block from [T, N, ...]
+        # Helper: gather [S, L, ...] from [T, N, ...] using (t_seq_mat, env_ids)
         def gather_seq(x):
             # x: [T, N, ...]
-            # We index per sequence with (t0 + k, n)
-            k = torch.arange(L, device=self.dev).view(1, L, 1)                     # [1, L, 1]
-            t_idx = t0_flat.view(S, 1, 1) + k                                      # [S, L, 1]
-            n_idx = n_flat.view(S, 1, 1).expand_as(t_idx)                          # [S, L, 1]
-            # Advanced indexing
-            return x[t_idx, n_idx].squeeze(-2)                                     # [S, L, ...]
+            # For each sequence s and position l, take x[t_seq_mat[s,l], env_ids[s]]
+            S_, L_ = t_seq_mat.shape
+            assert L_ == L
+            t_idx = t_seq_mat.unsqueeze(-1)                        # [S, L, 1]
+            n_idx = env_ids.view(S_, 1, 1).expand(S_, L_, 1)       # [S, L, 1]
+            out = x[t_idx, n_idx]                                  # [S, L, ...]
+            return out.squeeze(-2)                                 # [S, L, ...]
 
         obs_seq   = gather_seq(self.obs)
         legal_seq = gather_seq(self.legal)
@@ -191,15 +248,14 @@ class RolloutStorage:
         adv_seq   = gather_seq(self.adv)
         ret_seq   = gather_seq(self.ret)
 
-        # Initial hidden for each sequence = hidden stored at (t0, n)
-        if self.h is not None:
-            h0 = self.h[t0_flat, n_flat]                                           # [S, H]
+        # Initial hidden for each sequence = hidden stored at (t0, n),
+        # where t0 = first time index in that sequence for that seat.
+        if has_h:
+            t0 = t_seq_mat[:, 0]                     # [S]
+            h0 = self.h[t0, env_ids, :]             # [S, H]
         else:
-            # No hidden recorded: provide zeros
-            H = 1
-            # Try to infer H from obs vs model later; for now set 1 and let caller expand/ignore.
-            # Better: let ppo_update detect missing h and create zeros of model.hidden size.
-            h0 = torch.zeros(S, 1, device=self.dev, dtype=torch.float32)
+            # No hidden recorded: provide zeros; ppo_update will adjust if needed.
+            h0 = torch.zeros(len(env_ids), 1, device=self.dev, dtype=torch.float32)
 
         # Now yield minibatches over sequences
         for i in range(0, S, batch_size):
