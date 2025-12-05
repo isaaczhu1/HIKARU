@@ -1,7 +1,9 @@
 # ppo.py
+
 import torch
 import torch.nn.functional as F
 import numpy as np
+
 
 def masked_categorical(logits, legal_mask):
     """
@@ -36,8 +38,11 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
     Flat PPO (seq_len<=1) OR recurrent PPO with BPTT (seq_len>1 if cfg.ppo.seq_len set).
 
     - Flat mode uses storage.iter_minibatches(...)
+      and forwards [B,1,...] through the GRU with h0 taken from storage if available.
     - Recurrent mode uses storage.iter_sequence_minibatches(seq_len, batch_size_in_seqs)
-      and forwards [B, L, ...] through the GRU with h0 from storage.
+      and forwards [B,L,...] through the GRU with h0 from storage, where sequences
+      are constructed per (env, seat) so that training recurrence matches rollout
+      and each player's hidden state remains private to that player.
     """
     # --- Config / knobs ---
     clip = cfg.ppo.clip
@@ -58,21 +63,49 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
     if seq_len <= 1:
         for _ in range(epochs):
             for mb in storage.iter_minibatches(cfg.ppo.minibatch):
+                obs   = mb["obs"]        # [B, obs_dim]
+                legal = mb["legal"]      # [B, A]
+                seat  = mb["seat"]       # [B]
+                prev  = mb["prev_other"] # [B]
+
+                B = obs.shape[0]
+                device = obs.device
+
+                # Determine model hidden size
+                H_model = getattr(policy, "hidden", None)
+                if H_model is None and hasattr(policy, "gru"):
+                    H_model = policy.gru.hidden_size
+
+                # Initial hidden: use stored h0 if available; else zeros.
+                if "h0" in mb:
+                    h0 = mb["h0"]
+                    if h0.dim() != 2:
+                        h0 = h0.reshape(B, -1)
+                    if H_model is not None and h0.shape[1] != H_model:
+                        h0 = torch.zeros(B, H_model, device=device, dtype=obs.dtype)
+                else:
+                    if H_model is not None:
+                        h0 = torch.zeros(B, H_model, device=device, dtype=obs.dtype)
+                    else:
+                        # Fallback: use policy.initial_state if size unknown
+                        h0 = policy.initial_state(B, device=device).squeeze(0)
+                h0 = h0.unsqueeze(0)  # [1, B, H]
+
                 # Forward with seq_len=1
                 logits, value, _ = policy(
-                    obs_vec=mb["obs"].unsqueeze(1),            # [B,1,obs_dim]
-                    seat=mb["seat"].unsqueeze(1),              # [B,1]
-                    prev_other=mb["prev_other"].unsqueeze(1),  # [B,1]
-                    h=policy.initial_state(mb["obs"].shape[0], device=mb["obs"].device)
+                    obs_vec=obs.unsqueeze(1),            # [B,1,obs_dim]
+                    seat=seat.unsqueeze(1),              # [B,1]
+                    prev_other=prev.unsqueeze(1),        # [B,1]
+                    h=h0
                 )
-                logits = logits.squeeze(1)                     # [B,A]
-                value  = value.squeeze(1)                      # [B]
+                logits = logits.squeeze(1)               # [B, A]
+                value  = value.squeeze(1)                # [B]
 
                 # Masked categorical
                 very_neg = torch.finfo(logits.dtype).min
-                masked = logits.masked_fill(mb["legal"] < 0.5, very_neg)
+                masked = logits.masked_fill(legal < 0.5, very_neg)
                 dist = torch.distributions.Categorical(logits=masked)
-                logp = dist.log_prob(mb["act"])               # [B]
+                logp = dist.log_prob(mb["act"])          # [B]
                 entropy = dist.entropy().mean()
 
                 ratio = (logp - mb["logp_old"]).exp()
@@ -141,6 +174,7 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
 
             B, L = obs.shape[0], obs.shape[1]
             A = legal.shape[-1]
+            device = obs.device
 
             # Normalize advantages per minibatch over all timesteps
             adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
@@ -152,18 +186,18 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
             if h0.dim() != 2:
                 h0 = h0.reshape(B, -1)
             if H_model is not None and h0.shape[1] != H_model:
-                h0 = torch.zeros(B, H_model, device=obs.device, dtype=obs.dtype)
+                h0 = torch.zeros(B, H_model, device=device, dtype=obs.dtype)
+            h0 = h0.unsqueeze(0)  # [1, B, H]
 
             # Forward full sequence
             logits, values, _ = policy(
                 obs_vec=obs,                 # [B,L,obs_dim]
                 seat=seat,                   # [B,L]
                 prev_other=prev,             # [B,L]
-                h=h0.unsqueeze(0)            # [1,B,H]
+                h=h0                         # [1,B,H]
             )  # logits: [B,L,A], values: [B,L]
-            # values already [B,L] with your model; if [B,L,1], squeeze last dim:
             if values.dim() == 3 and values.shape[-1] == 1:
-                values = values.squeeze(-1)
+                values = values.squeeze(-1)  # [B,L]
 
             # Flatten time for masked dist & losses
             logits_f = logits.reshape(B * L, A)

@@ -1,4 +1,3 @@
-# config.py
 class CFG:
     # general
     seed = 0
@@ -26,16 +25,19 @@ class CFG:
         gamma = 0.99
         gae_lambda = 0.95
         max_grad_norm = 0.5
-        seq_len = 1            # disable recurrent PPO until rollout/train hidden usage match
+        # IMPORTANT:
+        # seq_len > 1 enables recurrent PPO with BPTT. With the updated storage/ppo
+        # code, sequences are now constructed per (env, seat), so GRU usage
+        # during training matches rollout and respects per-player information.
+        seq_len = 16
         value_clip = 0.2
-
 
     # New: simple schedules (used by train.py)
     class sched:
         lr_final = 3e-5        # linear decay end
         ent_final = 0.01       # entropy decay end
-        ent_decay_until = 200 # updates to reach ent_final
-        eps0 = 0.0            # ε-greedy start
+        ent_decay_until = 200  # updates to reach ent_final
+        eps0 = 0.0             # ε-greedy start
         eps_decay_until = 2000 # updates to reach 0
         target_kl = 0.02       # PPO early-stop threshold
 
