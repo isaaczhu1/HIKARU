@@ -241,7 +241,9 @@ def main(cfg: CFG, args):
     print("[debug] initial legal sums:", obs_dict["legal_mask"].sum(axis=1)[:8])
 
     # ---------- tensorboard logging ---------- #
-    tb_writer = SummaryWriter(log_dir="tb/" + out_dir)
+
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    tb_writer = SummaryWriter(log_dir=f"tb/{out_dir}/{timestamp}")
 
     # Infer dimensions from first observation
     obs_dim   = obs_dict["obs"].shape[-1]
@@ -366,8 +368,10 @@ def main(cfg: CFG, args):
             ep_return_mean = float(np.mean(ret_hist[-100:])) if len(ret_hist) > 0 else float(ep_ret.mean())
             ep_return_med  = float(np.median(ret_hist[-100:])) if len(ret_hist) > 0 else float(np.median(ep_ret))
 
+            time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
             print(
-                f"[upd {update+1:05d}/{total_updates:05d}] "
+                f"[{time_str}] [upd {update+1:05d}/{total_updates:05d}] "
                 f"env_steps={global_env_steps:,} "
                 f"R/ep(mean,last100)={ep_return_mean:.2f} "
                 f"R/ep(med,last100)={ep_return_med:.2f} "
