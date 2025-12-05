@@ -228,6 +228,7 @@ def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
 def main(cfg: CFG, args):
     # ---------- Device & seeding ---------- #
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[info] using device: {device}")
     seed_everything(cfg.seed)
 
     out_dir = args.save_dir or cfg.out_dir
@@ -349,6 +350,10 @@ def main(cfg: CFG, args):
         ent_coef_now = cfg.ppo.ent_coef + (cfg.sched.ent_final - cfg.ppo.ent_coef) * decay
         logs = ppo_update(policy=net, optimizer=opt, storage=storage, cfg=cfg, ent_coef_override=ent_coef_now)
 
+        vf_coef = cfg.ppo.vf_coef
+        # Approximate mean total loss across minibatches, matching ppo.py:
+        total_loss = logs["loss_pi"] + vf_coef * logs["loss_v"] - ent_coef_now * logs["entropy"]
+
         # Detach hidden banks so graph doesn’t grow across rollouts
         h0 = h0.detach()
         h1 = h1.detach()
@@ -368,6 +373,7 @@ def main(cfg: CFG, args):
                 f"R/ep(med,last100)={ep_return_med:.2f} "
                 f"loss_pi={logs['loss_pi']:.3f} "
                 f"loss_v={logs['loss_v']:.3f} "
+                f"total_loss={total_loss:.3f} "
                 f"entropy={logs['entropy']:.3f} "
                 f"clipfrac={logs['clip_frac']:.2f} "
                 f"fps~{fps}"
@@ -381,6 +387,7 @@ def main(cfg: CFG, args):
             tb_writer.add_scalar('losses/loss_v', logs['loss_v'], global_env_steps)
             tb_writer.add_scalar('losses/entropy', logs['entropy'], global_env_steps)
             tb_writer.add_scalar('losses/clip_frac', logs['clip_frac'], global_env_steps)
+            tb_writer.add_scalar('losses/total_loss', total_loss, global_env_steps)
             tb_writer.flush()
 
         # ---- Checkpointing ----
