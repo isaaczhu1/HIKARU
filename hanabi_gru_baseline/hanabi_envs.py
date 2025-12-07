@@ -1,4 +1,4 @@
-# envs.py
+# hanabi_envs.py
 # -----------------------------------------------------------------------------
 # HanabiGym2P over DeepMind rl_env.HanabiEnv (2 players), observation-driven.
 # -----------------------------------------------------------------------------
@@ -13,14 +13,32 @@ from hanabi_learning_environment import rl_env
 # Debug prints (export HANABI_DEBUG=1 to enable)
 _DEBUG = bool(int(os.environ.get("HANABI_DEBUG", "0")))
 
-# ---------------------------- Env wrapper ---------------------------------- #
+
 class HanabiGym2P(gym.Env):
+    """
+    Gymnasium-compatible wrapper around DeepMind's rl_env.HanabiEnv for 2-player Hanabi.
+
+    Observations:
+      - "obs": flat float32 vector (DeepMind "vectorized" obs for the current player)
+      - "legal_mask": float32[ num_moves ] with 1.0 for legal action ids, 0.0 otherwise
+      - "seat": int {0,1}, the current player index
+      - "prev_other_action": int in [0..num_moves] where num_moves is a sentinel "none"
+
+    Actions:
+      action_id in [0..num_moves-1], with layout:
+        0..H-1           : PLAY card_index = i
+        H..2H-1          : DISCARD card_index = i-H
+        2H..2H+C-1       : REVEAL_COLOR color = i-(2H)
+        2H+C..2H+C+R-1   : REVEAL_RANK  rank  = i-(2H+C)
+    """
+
     metadata = {"render_modes": []}
 
     def __init__(self, seed, obs_conf,
                  players=2, colors=5, ranks=5, hand_size=5,
                  max_information_tokens=8, max_life_tokens=3,
                  random_start_player=False):
+        super().__init__()
         self.players = players
         self.colors = colors
         self.ranks = ranks
@@ -37,6 +55,7 @@ class HanabiGym2P(gym.Env):
             "random_start_player": random_start_player,
             "seed": seed,
         })
+
         # --- probe real vectorized obs length once, set stable obs space ---
         obs_dim = 1
         try:
@@ -49,7 +68,6 @@ class HanabiGym2P(gym.Env):
         except Exception:
             pass
 
-
         # --- dynamic action layout ---
         self._a_play0         = 0
         self._a_discard0      = self._a_play0 + hand_size
@@ -57,20 +75,20 @@ class HanabiGym2P(gym.Env):
         self._a_reveal_rank0  = self._a_reveal_color0 + colors
 
         self.num_moves = 2 * hand_size + colors + ranks
-        self.sentinel_none = self.num_moves  # <-- sentinel for "no previous action"
+        self.sentinel_none = self.num_moves      # sentinel for "no previous action"
         self._hint_target_offset = 1 if players > 1 else 0
 
-        self.observation_space = gym.spaces.Dict({
-            "obs": gym.spaces.Box(-np.inf, np.inf, shape=(obs_dim,), dtype=np.float32),
-            "legal_mask": gym.spaces.Box(0.0, 1.0, shape=(self.num_moves,), dtype=np.float32),
-            "seat": gym.spaces.Discrete(players),
-            "prev_other_action": gym.spaces.Discrete(self.num_moves + 1),
+        self.observation_space = spaces.Dict({
+            "obs": spaces.Box(-np.inf, np.inf, shape=(obs_dim,), dtype=np.float32),
+            "legal_mask": spaces.Box(0.0, 1.0, shape=(self.num_moves,), dtype=np.float32),
+            "seat": spaces.Discrete(players),
+            "prev_other_action": spaces.Discrete(self.num_moves + 1),
         })
-        self.action_space = gym.spaces.Discrete(self.num_moves)
+        self.action_space = spaces.Discrete(self.num_moves)
 
         # Runtime state
         self._last_obs = None
-        self._last_score = 0
+        self._score_accum = 0.0   # running sum of rewards (our notion of score)
         self.prev_action = [self.sentinel_none for _ in range(self.players)]  # per-seat last action id
         self.turn_count = 0
 
@@ -79,37 +97,22 @@ class HanabiGym2P(gym.Env):
     def _seat_from_obs(obs: dict) -> int:
         return int(obs.get("current_player", 0))
 
-    def _score_from_obs(self, obs: dict) -> int:
-        """
-        Score = sum of highest ranks on fireworks stacks.
-        rl_env exposes fireworks as a dict: color -> highest rank (0..R or 1..R depending on build).
-        We normalize to integers and sum directly (no +1 offset).
-        """
-        p = self._seat_from_obs(obs)
-        pov = obs["player_observations"][p]
-        fw = pov.get("fireworks", {})
-        # Accept either 0- or 1-based, clamp into [0, ranks]
-        total = 0
-        for v in fw.values():
-            try:
-                iv = int(v)
-            except Exception:
-                iv = 0
-            if 1 <= iv <= self.ranks:
-                total += iv
-            elif 0 <= iv <= self.ranks:
-                total += iv
-        return int(total)
-
     def _legal_moves_from_obs(self, obs: dict):
         p = self._seat_from_obs(obs)
         return list(obs["player_observations"][p].get("legal_moves", []))
 
     # ID layout helpers
-    def _id_for_play(self, idx: int) -> int: return idx
-    def _id_for_discard(self, idx: int) -> int: return self.hand_size + idx
-    def _id_for_reveal_color(self, color: int) -> int: return 2 * self.hand_size + color
-    def _id_for_reveal_rank(self, rank: int) -> int: return 2 * self.hand_size + self.colors + rank
+    def _id_for_play(self, idx: int) -> int:
+        return idx
+
+    def _id_for_discard(self, idx: int) -> int:
+        return self.hand_size + idx
+
+    def _id_for_reveal_color(self, color: int) -> int:
+        return 2 * self.hand_size + color
+
+    def _id_for_reveal_rank(self, rank: int) -> int:
+        return 2 * self.hand_size + self.colors + rank
 
     def _parse_color(self, c) -> int:
         """Map rl_env color payloads ('R','Y','G','B','W' or names/ints) -> 0..colors-1."""
@@ -138,7 +141,6 @@ class HanabiGym2P(gym.Env):
             return max(0, min(v - 1, self.ranks - 1))
         return 0
 
-    # id -> rl and rl -> id now use the dynamic bases above
     def _id_from_rl_action(self, a):
         t = self._act_type(a)
         if t == "PLAY":
@@ -193,9 +195,7 @@ class HanabiGym2P(gym.Env):
         else:
             return False
 
-        # Final exact id match
         return self._id_from_rl_action(a) == gid
-
 
     # ------------------------------- Gym API -------------------------------- #
     def _reset_world(self, seed=None):
@@ -205,7 +205,7 @@ class HanabiGym2P(gym.Env):
             obs = self._env.reset()
 
         self._last_obs = obs
-        self._last_score = self._score_from_obs(obs)
+        self._score_accum = 0.0
         self.prev_action = [self.sentinel_none for _ in range(self.players)]
         self.turn_count = 0
         return obs
@@ -213,7 +213,6 @@ class HanabiGym2P(gym.Env):
     def _act_type(self, a: dict) -> str:
         """Return action type string from rl_env action dict."""
         return a.get("action_type", a.get("type", None))
-
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         obs = self._reset_world(seed)
@@ -225,7 +224,8 @@ class HanabiGym2P(gym.Env):
         if not legal:
             # Defensive reset (should be rare)
             obs = self._reset_world()
-            return self._pack_obs(obs), 0.0, False, False, {}
+            info = {"score": float(self._score_accum)}
+            return self._pack_obs(obs), 0.0, False, False, info
 
         choice = None
         for a in legal:
@@ -235,17 +235,25 @@ class HanabiGym2P(gym.Env):
         if choice is None:
             choice = legal[0]
 
-        # Reward shaping: +1 if score increases after the action
-        score_before = self._last_score
+        # Step underlying env
         next_obs, env_rew, done, info = self._env.step(choice)
         self._last_obs = next_obs
-        score_after = self._score_from_obs(next_obs)
-        self._last_score = score_after
 
-        shaped = float(max(0, score_after - score_before))
+        # Reward shaping: ensure non-negative reward increments
+        # DeepMind Hanabi's reward is typically the score delta, but we clamp to >= 0.
+        shaped = float(max(0.0, float(env_rew)))
+
+        # Accumulate shaped reward as our notion of "score"
+        self._score_accum += shaped
+
+        # Make sure info is a dict and always carries the current accumulated score
+        if info is None:
+            info = {}
+        if not isinstance(info, dict):
+            info = dict(info)
+        info["score"] = float(self._score_accum)
 
         # prev action bookkeeping:
-        # After env.step, current player is seat_now; the player who just acted is prev seat.
         seat_now = self._seat_from_obs(next_obs)
         just_acted = (seat_now - 1) % self.players
         if 0 <= just_acted < self.players:
@@ -254,7 +262,7 @@ class HanabiGym2P(gym.Env):
         self.turn_count += 1
         terminated = bool(done)
         truncated = False
-        return self._pack_obs(next_obs), shaped, terminated, truncated, (info or {})
+        return self._pack_obs(next_obs), shaped, terminated, truncated, info
 
     # ------------------------------ Packing --------------------------------- #
     def _pack_obs(self, obs: dict) -> dict:
@@ -294,5 +302,5 @@ class HanabiGym2P(gym.Env):
             "obs": obs_vec,
             "legal_mask": legal_mask,
             "seat": int(seat),
-            "prev_other_action": int(prev_other),  # <-- sentinel_none on first move
+            "prev_other_action": int(prev_other),
         }

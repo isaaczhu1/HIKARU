@@ -6,18 +6,17 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 DEVICE="${DEVICE:-cuda}"
 TOTAL_UPDATES="${TOTAL_UPDATES:-50000}"
-LR="${LR:-1e-4}"
+LR="${LR:-3e-5}"
 LR_FINAL="${LR_FINAL:-3e-5}"
-# CKPT="${CKPT:-runs/hanabi/isaacs_first_run/ckpt_010000.pt}"
 CKPT="${CKPT:-}"
-SAVE_DIR="${SAVE_DIR:-runs/hanabi/isaacs_second_run}"
-DEBUG="${DEBUG:-0}"        # 1 to pass --debug
-ASYNC_ENV="${ASYNC_ENV:-0}" # 1 to pass --async-env
-VARIANT="${VARIANT:-twoxtwo}" # twoxtwo | standard
+SAVE_DIR="${SAVE_DIR:-runs/hanabi_async}"
+DEBUG="${DEBUG:-0}"          # 1 to pass --debug
+ASYNC_ENV=1                  # always async in this script
+VARIANT="${VARIANT:-standard}" # twoxtwo | standard
+NUM_ENVS="${NUM_ENVS:-24}"  # number of parallel envs/workers (the parameter you asked about)
 
 # Additional config visibility (defined in config.py; change there to affect runs)
 SEED="${SEED:-67}"
-NUM_ENVS="${NUM_ENVS:-64}"
 UNROLL_T="${UNROLL_T:-128}"
 OBS_MODE="${OBS_MODE:-minimal}"
 LOG_INTERVAL="${LOG_INTERVAL:-10}"
@@ -26,8 +25,8 @@ SAVE_INTERVAL="${SAVE_INTERVAL:-2000}"
 TS="$(date +"%Y%m%d_%H%M%S")"
 LOG_DIR="runs"
 mkdir -p "$LOG_DIR"
-LOG_FILE="${LOG_DIR}/train_${TS}.log"
-PID_FILE="${LOG_DIR}/train_${TS}.pid"
+LOG_FILE="${LOG_DIR}/train_async_${TS}.log"
+PID_FILE="${LOG_DIR}/train_async_${TS}.pid"
 
 CMD=(python -u train.py
   --device "$DEVICE"
@@ -36,11 +35,11 @@ CMD=(python -u train.py
   --lr-final "$LR_FINAL"
   --save-dir "$SAVE_DIR"
   --variant "$VARIANT"
+  --async-env
 )
 
 [[ -n "$CKPT" ]] && CMD+=(--ckpt "$CKPT")
 [[ "$DEBUG" -eq 1 ]] && CMD+=(--debug)
-[[ "$ASYNC_ENV" -eq 1 ]] && CMD+=(--async-env)
 
 # Log launch configuration for reproducibility
 {
@@ -54,8 +53,8 @@ CMD=(python -u train.py
   echo "VARIANT=$VARIANT"
   echo "DEBUG=$DEBUG"
   echo "ASYNC_ENV=$ASYNC_ENV"
-  echo "SEED=$SEED"
   echo "NUM_ENVS=$NUM_ENVS"
+  echo "SEED=$SEED"
   echo "UNROLL_T=$UNROLL_T"
   echo "OBS_MODE=$OBS_MODE"
   echo "LOG_INTERVAL=$LOG_INTERVAL"
@@ -66,6 +65,6 @@ CMD=(python -u train.py
 nohup "${CMD[@]}" >>"$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 
-echo "Started training (PID $(cat "$PID_FILE"))"
+echo "Started ASYNC training (PID $(cat "$PID_FILE"))"
 echo "Log: $LOG_FILE"
 echo "PID file: $PID_FILE"
