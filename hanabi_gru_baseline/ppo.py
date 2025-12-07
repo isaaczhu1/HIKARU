@@ -41,10 +41,8 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
       and forwards [B,1,...] through the GRU with h0 taken from storage if available.
     - Recurrent mode uses storage.iter_sequence_minibatches(seq_len, batch_size_in_seqs)
       and forwards [B,L,...] through the GRU with h0 from storage, where sequences
-      are constructed per (env, seat) so that training recurrence matches rollout
-      and each player's hidden state remains private to that player.
+      are constructed per (env, seat) and do not cross episode boundaries.
     """
-    # --- Config / knobs ---
     clip = cfg.ppo.clip
     vf_coef = cfg.ppo.vf_coef
     max_grad_norm = cfg.ppo.max_grad_norm
@@ -52,7 +50,7 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
     ent_coef = getattr(cfg.ppo, "ent_coef", 0.0) if ent_coef_override is None else ent_coef_override
     seq_len = int(getattr(cfg.ppo, "seq_len", 1))
     v_clip = float(getattr(cfg.ppo, "value_clip", 0.2))
-    # target_kl: prefer explicit arg, else cfg.sched.target_kl if present
+
     if target_kl is None:
         target_kl = getattr(getattr(cfg, "sched", object()), "target_kl", None)
 
@@ -71,12 +69,10 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
                 B = obs.shape[0]
                 device = obs.device
 
-                # Determine model hidden size
                 H_model = getattr(policy, "hidden", None)
                 if H_model is None and hasattr(policy, "gru"):
                     H_model = policy.gru.hidden_size
 
-                # Initial hidden: use stored h0 if available; else zeros.
                 if "h0" in mb:
                     h0 = mb["h0"]
                     if h0.dim() != 2:
@@ -87,11 +83,9 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
                     if H_model is not None:
                         h0 = torch.zeros(B, H_model, device=device, dtype=obs.dtype)
                     else:
-                        # Fallback: use policy.initial_state if size unknown
                         h0 = policy.initial_state(B, device=device).squeeze(0)
                 h0 = h0.unsqueeze(0)  # [1, B, H]
 
-                # Forward with seq_len=1
                 logits, value, _ = policy(
                     obs_vec=obs.unsqueeze(1),            # [B,1,obs_dim]
                     seat=seat.unsqueeze(1),              # [B,1]
@@ -101,7 +95,6 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
                 logits = logits.squeeze(1)               # [B, A]
                 value  = value.squeeze(1)                # [B]
 
-                # Masked categorical
                 very_neg = torch.finfo(logits.dtype).min
                 masked = logits.masked_fill(legal < 0.5, very_neg)
                 dist = torch.distributions.Categorical(logits=masked)
@@ -109,13 +102,11 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
                 entropy = dist.entropy().mean()
 
                 ratio = (logp - mb["logp_old"]).exp()
-                # Normalize advantages in-minibatch
                 adv = (mb["adv"] - mb["adv"].mean()) / (mb["adv"].std(unbiased=False) + 1e-8)
                 surr1 = ratio * adv
                 surr2 = torch.clamp(ratio, 1 - clip, 1 + clip) * adv
                 loss_pi = -(torch.min(surr1, surr2)).mean()
 
-                # Value loss (clipped)
                 loss_v = _value_loss_clipped(
                     v_pred=value,
                     v_old=mb["val_old"],
@@ -140,7 +131,6 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
                 pi_all.append(float(loss_pi))
                 v_all.append(float(loss_v))
 
-            # Early stop on target KL (per-epoch)
             if target_kl is not None and approx_kl_tracking > target_kl:
                 break
 
@@ -152,34 +142,27 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
         }
 
     # ------------------------- RECURRENT (BPTT) MODE ------------------------- #
-    # Convert sample-sized minibatch to sequences-per-minibatch
-    # e.g. if minibatch=2048 and seq_len=16 -> 128 sequences per minibatch
     seqs_per_mb = max(1, int(cfg.ppo.minibatch // seq_len))
 
     for _ in range(epochs):
         for mb in storage.iter_sequence_minibatches(seq_len=seq_len, batch_size=seqs_per_mb):
-            # mb fields shaped:
-            #   obs [B,L,obs_dim], legal [B,L,A], seat [B,L], prev_other [B,L],
-            #   act [B,L], logp_old [B,L], adv [B,L], ret [B,L], h0 [B,H], val_old [B,L]
-            obs   = mb["obs"]
-            legal = mb["legal"]
-            seat  = mb["seat"]
-            prev  = mb["prev_other"]
-            act   = mb["act"]
-            logp_old = mb["logp_old"]
-            adv   = mb["adv"]
-            ret   = mb["ret"]
-            h0    = mb["h0"]
-            val_old = mb["val_old"]
+            obs   = mb["obs"]        # [B,L,obs_dim]
+            legal = mb["legal"]      # [B,L,A]
+            seat  = mb["seat"]       # [B,L]
+            prev  = mb["prev_other"] # [B,L]
+            act   = mb["act"]        # [B,L]
+            logp_old = mb["logp_old"]# [B,L]
+            adv   = mb["adv"]        # [B,L]
+            ret   = mb["ret"]        # [B,L]
+            h0    = mb["h0"]         # [B,H]
+            val_old = mb["val_old"]  # [B,L]
 
             B, L = obs.shape[0], obs.shape[1]
             A = legal.shape[-1]
             device = obs.device
 
-            # Normalize advantages per minibatch over all timesteps
             adv = (adv - adv.mean()) / (adv.std(unbiased=False) + 1e-8)
 
-            # Ensure h0 matches model hidden size; fall back to zeros if storage didn't record size
             H_model = getattr(policy, "hidden", None)
             if H_model is None and hasattr(policy, "gru"):
                 H_model = policy.gru.hidden_size
@@ -189,17 +172,15 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
                 h0 = torch.zeros(B, H_model, device=device, dtype=obs.dtype)
             h0 = h0.unsqueeze(0)  # [1, B, H]
 
-            # Forward full sequence
             logits, values, _ = policy(
                 obs_vec=obs,                 # [B,L,obs_dim]
                 seat=seat,                   # [B,L]
                 prev_other=prev,             # [B,L]
                 h=h0                         # [1,B,H]
-            )  # logits: [B,L,A], values: [B,L]
+            )
             if values.dim() == 3 and values.shape[-1] == 1:
                 values = values.squeeze(-1)  # [B,L]
 
-            # Flatten time for masked dist & losses
             logits_f = logits.reshape(B * L, A)
             legal_f  = legal.reshape(B * L, A)
             very_neg = torch.finfo(logits_f.dtype).min
@@ -222,7 +203,6 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
             surr2 = torch.clamp(ratio_f, 1.0 - clip, 1.0 + clip) * adv_f
             loss_pi = -(torch.min(surr1, surr2)).mean()
 
-            # Value loss (clipped)
             loss_v  = _value_loss_clipped(
                 v_pred=val_f,
                 v_old=val_old_f,
@@ -247,7 +227,6 @@ def ppo_update(policy, optimizer, storage, cfg, ent_coef_override=None, target_k
             pi_all.append(float(loss_pi))
             v_all.append(float(loss_v))
 
-        # Early stop on target KL (per-epoch)
         if target_kl is not None and approx_kl_tracking > target_kl:
             break
 
