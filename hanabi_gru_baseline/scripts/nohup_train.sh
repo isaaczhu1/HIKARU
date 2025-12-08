@@ -6,7 +6,7 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 TS="$(date +"%Y%m%d_%H%M%S")"
 DEVICE="${DEVICE:-cuda}"
-TOTAL_UPDATES="${TOTAL_UPDATES:-510}"
+TOTAL_UPDATES="${TOTAL_UPDATES:-1000}"
 LR="${LR:-1e-4}"
 LR_FINAL="${LR_FINAL:-3e-5}"
 # CKPT="${CKPT:-runs/hanabi/isaacs_first_run/ckpt_010000.pt}"
@@ -15,7 +15,7 @@ SAVE_DIR="${SAVE_DIR:-runs/hanabi/standard_train/$TS}"
 DEBUG="${DEBUG:-0}"        # 1 to pass --debug
 ASYNC_ENV="${ASYNC_ENV:-0}" # 1 to pass --async-env
 VARIANT="${VARIANT:-standard}" # twoxtwo | standard
-SEQ_LEN="${SEQ_LEN:-1}"     # optional PPO seq_len override
+SEQ_LEN="${SEQ_LEN:-4}"     # optional PPO seq_len override
 START_UPDATE="${START_UPDATE:-0}" # optional override for starting update counter
 
 # Additional config visibility (defined in config.py; change there to affect runs)
