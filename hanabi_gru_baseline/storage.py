@@ -130,6 +130,18 @@ class RolloutStorage:
         seq_t_indices = []
         seq_env_ids   = []
 
+        def _append_segment(segment: list, env_id: int):
+            S_seg = len(segment)
+            if S_seg >= L:
+                for start in range(0, S_seg - L + 1):
+                    t_seq = torch.tensor(
+                        segment[start:start + L],
+                        device=self.dev,
+                        dtype=torch.long,
+                    )
+                    seq_t_indices.append(t_seq)
+                    seq_env_ids.append(env_id)
+
         for n in range(N):
             seat_vals = torch.unique(self.seat[:, n])
             for s_val in seat_vals.tolist():
@@ -147,31 +159,13 @@ class RolloutStorage:
                         continue
 
                     if self.done[last_t:t + 1, n].any():
-                        if len(segment) >= L:
-                            num_full = len(segment) // L
-                            for j in range(num_full):
-                                t_seq = torch.tensor(
-                                    segment[j * L:(j + 1) * L],
-                                    device=self.dev,
-                                    dtype=torch.long,
-                                )
-                                seq_t_indices.append(t_seq)
-                                seq_env_ids.append(n)
+                        _append_segment(segment, n)
                         segment = [t]
                     else:
                         segment.append(t)
                     last_t = t
 
-                if len(segment) >= L:
-                    num_full = len(segment) // L
-                    for j in range(num_full):
-                        t_seq = torch.tensor(
-                            segment[j * L:(j + 1) * L],
-                            device=self.dev,
-                            dtype=torch.long,
-                        )
-                        seq_t_indices.append(t_seq)
-                        seq_env_ids.append(n)
+                _append_segment(segment, n)
 
         S = len(seq_t_indices)
         if S == 0:
