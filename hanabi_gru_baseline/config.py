@@ -25,12 +25,8 @@ class CFG:
         gamma = 0.99
         gae_lambda = 0.95
         max_grad_norm = 0.5
-        # IMPORTANT:
-        # seq_len > 1 enables recurrent PPO with BPTT. With the updated storage/ppo
-        # code, sequences are now constructed per (env, seat), so GRU usage
-        # during training matches rollout and respects per-player information.
-        seq_len = 16
-        value_clip = 0.2
+        seq_len = 16 # can be overridden in the train.py args
+        value_clip = 0.2 
 
     # New: simple schedules (used by train.py)
     class sched:

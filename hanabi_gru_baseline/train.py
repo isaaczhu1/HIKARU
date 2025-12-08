@@ -9,18 +9,15 @@ import time
 import argparse
 import numpy as np
 import torch
-from gymnasium.vector import SyncVectorEnv, AsyncVectorEnv
 
 from config import CFG
-from hanabi_envs import HanabiGym2P
+from hanabi_envs import HanabiEnv2P, HanabiVecEnvSync
 from model import HanabiGRUPolicy
 from storage import RolloutStorage
 from ppo import ppo_update
 from utils import seed_everything, save_ckpt, load_ckpt
 
 from torch.utils.tensorboard import SummaryWriter
-
-IS_DARWIN = sys.platform == "darwin"
 
 
 # ----------------------------- Argument parsing ------------------------------ #
@@ -34,82 +31,35 @@ def parse_args():
     ap.add_argument("--save-dir", type=str, default=None, help="override output dir")
     ap.add_argument("--debug", action="store_true", help="extra asserts/prints")
     ap.add_argument("--async-env", action="store_true",
-                    help="use AsyncVectorEnv (default false on macOS for stability)")
+                    help="(unused) placeholder for future async vec env")
     ap.add_argument("--variant", type=str, default="twoxtwo",
                     choices=["twoxtwo", "standard"],
                     help="Hanabi size preset.")
+    ap.add_argument("--seq-len", type=int, default=None,
+                    help="override PPO sequence length (for BPTT); default from config")
+    ap.add_argument("--num-envs", type=int, default=None, help="override number of parallel envs")
+    ap.add_argument("--unroll-T", type=int, default=None, help="override rollout length per update")
+    ap.add_argument("--obs-mode", type=str, default=None, help="override observation mode")
+    ap.add_argument("--save-interval", type=int, default=None, help="checkpoint interval (updates)")
+    ap.add_argument("--log-interval", type=int, default=None, help="logging interval (updates)")
+    ap.add_argument("--seed", type=int, default=None, help="override base seed")
+    ap.add_argument("--start-update", type=int, default=None,
+                    help="override starting update counter (useful when loading ckpt but restarting count)")
     return ap.parse_args()
 
 
 # ----------------------------- Vec env factory ------------------------------- #
-def make_vec_env(n_envs, seed0, obs_conf="minimal", use_async=None, hanabi_cfg=None):
-    def thunk(i):
-        return lambda: HanabiGym2P(
-            seed=seed0 + i,
-            obs_conf=obs_conf,
-            players=hanabi_cfg.players,
-            colors=hanabi_cfg.colors,
-            ranks=hanabi_cfg.ranks,
-            hand_size=hanabi_cfg.hand_size,
-            max_information_tokens=hanabi_cfg.max_information_tokens,
-            max_life_tokens=hanabi_cfg.max_life_tokens,
-            random_start_player=hanabi_cfg.random_start_player,
-        )
-
-    if use_async is None:
-        use_async = not IS_DARWIN
-    Vec = AsyncVectorEnv if use_async else SyncVectorEnv
-    return Vec([thunk(i) for i in range(n_envs)])
+def make_vec_env(n_envs, seed0, obs_conf="minimal", hanabi_cfg=None):
+    return HanabiVecEnvSync(n_envs=n_envs, seed0=seed0, obs_conf=obs_conf, hanabi_cfg=hanabi_cfg)
 
 
 # ----------------------------- Env reset helper ------------------------------ #
-def _reset_indices(env, idxs):
-    """
-    Reset a subset of vectorized envs and return fresh obs_dicts in the same slot order.
-    Handles both AsyncVectorEnv and SyncVectorEnv, as well as fallback vector resets.
-    """
-    if not idxs:
-        return []
-
-    fresh = []
-    if hasattr(env, "env_method"):  # AsyncVectorEnv
-        results = env.env_method("reset", indices=idxs)
-        for r in results:
-            r0 = r[0] if isinstance(r, tuple) else r
-            assert isinstance(r0, dict) and "obs" in r0, "reset() did not return an obs-dict"
-            fresh.append(r0)
-        return fresh
-
-    if hasattr(env, "envs"):  # SyncVectorEnv
-        for i in idxs:
-            res = env.envs[i].reset()
-            r0 = res[0] if isinstance(res, tuple) else res
-            assert isinstance(r0, dict) and "obs" in r0, "reset() did not return an obs-dict"
-            fresh.append(r0)
-        return fresh
-
-    # Fallback: reset all and pick the ones we need (rare)
-    all_obs, _ = env.reset()
-    if isinstance(all_obs, dict):
-        for j in idxs:
-            slot = {}
-            for k, v in all_obs.items():
-                try:
-                    slot[k] = v[j]
-                except Exception:
-                    pass
-            fresh.append(slot)
-        return fresh
-
-    return [all_obs[j] for j in idxs]
-
-
 # ---------------------------- One environment step --------------------------- #
 @torch.no_grad()
 def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
     """
     Execute a single time step for all N envs in the vector env.
-    Auto-resets any slots with zero-legal before sampling, and post-step for done slots.
+    Handles forced resets for zero-legal rows; regular episode resets are handled by caller.
     """
     N = obs_dict["obs"].shape[0]
     forced_reset = np.zeros(N, dtype=np.bool_)
@@ -119,7 +69,7 @@ def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
     sum_legal = legal_np.sum(axis=1)
     if np.any(sum_legal == 0):
         bad_idxs = np.nonzero(sum_legal == 0)[0].tolist()
-        fresh = _reset_indices(env, bad_idxs)
+        fresh = env.reset_indices(bad_idxs)
         for slot, j in enumerate(bad_idxs):
             new_o = fresh[slot]
             obs_dict["obs"][j] = new_o["obs"].astype(np.float32, copy=False)
@@ -129,7 +79,6 @@ def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
             forced_reset[j] = True
         legal_np = obs_dict["legal_mask"]
 
-        # Keep GRU in sync with env resets: zero hidden for forced-reset envs
         fr_ids = np.nonzero(forced_reset)[0]
         if fr_ids.size > 0:
             fr_t = torch.from_numpy(fr_ids).to(device)
@@ -137,13 +86,12 @@ def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
             h1[:, fr_t, :] = 0.0
 
     # ----- Torchify current batch -----
-    obs   = torch.from_numpy(obs_dict["obs"]).to(device).float()         # [N, obs_dim]
-    legal = torch.from_numpy(legal_np).to(device).float()                # [N, A]
-    seat  = torch.from_numpy(obs_dict["seat"]).to(device).long()         # [N]
-    prev  = torch.from_numpy(obs_dict["prev_other_action"]).to(device).long()  # [N]
+    obs = torch.from_numpy(obs_dict["obs"]).to(device).float()  # [N, obs_dim]
+    legal = torch.from_numpy(legal_np).to(device).float()  # [N, A]
+    seat = torch.from_numpy(obs_dict["seat"]).to(device).long()  # [N]
+    prev = torch.from_numpy(obs_dict["prev_other_action"]).to(device).long()  # [N]
 
-    # Last-resort safety: if any row is still zero-legal, make action 0 legal
-    zero_rows = (legal.sum(dim=1) == 0)
+    zero_rows = legal.sum(dim=1) == 0
     if zero_rows.any():
         legal[zero_rows, 0] = 1.0
         if debug:
@@ -151,56 +99,39 @@ def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
             print(f"[warn] Forcing a legal action on rows {zr}", flush=True)
 
     # ----- Select per-seat hidden -----
-    h_in = torch.where(seat.view(1, -1, 1) == 0, h0, h1)                 # [1, N, H]
+    h_in = torch.where(seat.view(1, -1, 1) == 0, h0, h1)  # [1, N, H]
 
     # ----- Forward (seq len 1) -----
     logits, value, h_new = net(
-        obs_vec=obs.unsqueeze(1),        # [N, 1, obs_dim]
-        seat=seat.unsqueeze(1),          # [N, 1]
-        prev_other=prev.unsqueeze(1),    # [N, 1]
-        h=h_in                           # [1, N, H]
+        obs_vec=obs.unsqueeze(1),  # [N, 1, obs_dim]
+        seat=seat.unsqueeze(1),  # [N, 1]
+        prev_other=prev.unsqueeze(1),  # [N, 1]
+        h=h_in,  # [1, N, H]
     )
-    logits = logits.squeeze(1)           # [N, A]
-    value  = value.squeeze(1)            # [N]
+    logits = logits.squeeze(1)  # [N, A]
+    value = value.squeeze(1)  # [N]
 
     # ----- Sample masked actions with ε-greedy mixture over legal -----
-    probs = torch.softmax(logits, dim=-1)              # [N, A]
-    probs = probs * legal                              # mask illegal
+    probs = torch.softmax(logits, dim=-1)  # [N, A]
+    probs = probs * legal  # mask illegal
     probs = probs / probs.sum(dim=1, keepdim=True).clamp_min(1e-8)
     uniform = legal / legal.sum(dim=1, keepdim=True).clamp_min(1e-8)
-    mix = (1.0 - eps) * probs + eps * uniform          # [N, A]
+    mix = (1.0 - eps) * probs + eps * uniform  # [N, A]
     action = torch.multinomial(mix, num_samples=1).squeeze(1)  # [N]
 
-    # Log-prob under the POLICY (not the mixture) for PPO ratios
     logp = torch.log(probs.gather(1, action.view(-1, 1)).squeeze(1).clamp_min(1e-8))
 
     # ----- Step env -----
-    next_obs_dict, rew_np, done_np, trunc_np, info = env.step(action.detach().cpu().numpy())
+    next_obs_dict, rew_np, done_np, info_list = env.step_all(action.detach().cpu().numpy())
 
-    # Extract per-env score from info if present
     scores_np = None
-    if info is not None:
-        if isinstance(info, dict) and "score" in info:
-            scores_np = np.asarray(info["score"], dtype=np.float32)
-        elif isinstance(info, (list, tuple)):
-            maybe_scores = []
-            for item in info:
-                if isinstance(item, dict) and "score" in item:
-                    maybe_scores.append(item["score"])
-                else:
-                    maybe_scores.append(np.nan)
-            if maybe_scores:
-                scores_np = np.asarray(maybe_scores, dtype=np.float32)
+    if info_list:
+        scores_np = np.asarray([info.get("score", np.nan) for info in info_list], dtype=np.float32)
 
-    # Normalize env outputs defensively
     if not isinstance(rew_np, np.ndarray):
         rew_np = np.asarray(rew_np, dtype=np.float32)
-    if isinstance(trunc_np, np.ndarray):
-        done_or_trunc = np.logical_or(done_np, trunc_np)
-    else:
-        done_or_trunc = done_np
-    if not isinstance(done_or_trunc, np.ndarray):
-        done_or_trunc = np.asarray(done_or_trunc, dtype=bool)
+    if not isinstance(done_np, np.ndarray):
+        done_np = np.asarray(done_np, dtype=bool)
 
     # ----- Write back updated hidden to acting seat bank -----
     idx0 = (seat == 0).nonzero(as_tuple=False).squeeze(-1)
@@ -211,24 +142,12 @@ def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
         h1[:, idx1, :] = h_new[:, idx1, :]
 
     # ----- Reset both seat hiddens for done slots -----
-    if np.any(done_or_trunc):
-        reset_ids = torch.from_numpy(done_or_trunc.astype(np.uint8)).to(device).nonzero(as_tuple=False).squeeze(-1)
+    if np.any(done_np):
+        reset_ids = torch.from_numpy(done_np.astype(np.uint8)).to(device).nonzero(as_tuple=False).squeeze(-1)
         if reset_ids.numel() > 0:
             h0[:, reset_ids, :] = 0.0
             h1[:, reset_ids, :] = 0.0
 
-    # ----- Immediately auto-reset done envs so next loop has valid legals -----
-    if np.any(done_or_trunc):
-        idxs = np.nonzero(done_or_trunc)[0].tolist()
-        fresh = _reset_indices(env, idxs)
-        for slot, j in enumerate(idxs):
-            o = fresh[slot]
-            next_obs_dict["obs"][j] = o["obs"].astype(np.float32, copy=False)
-            next_obs_dict["legal_mask"][j] = o["legal_mask"].astype(np.float32, copy=False)
-            next_obs_dict["seat"][j] = np.int64(o["seat"])
-            next_obs_dict["prev_other_action"][j] = np.int64(o["prev_other_action"])
-
-    # ----- Build storage record -----
     step_record = {
         "obs": obs,
         "legal": legal,
@@ -238,12 +157,11 @@ def do_step(env, net, device, h0, h1, obs_dict, debug=False, eps=0.0):
         "logp": logp.detach(),
         "value": value.detach(),
         "reward": torch.from_numpy(rew_np).to(device).float(),
-        "done": torch.from_numpy(done_or_trunc.astype(np.float32)).to(device),
+        "done": torch.from_numpy(done_np.astype(np.float32)).to(device),
         "h": h_in.squeeze(0).detach(),
     }
 
-    # include score for logging in main
-    epi = {"done": done_or_trunc, "reward": rew_np, "score": scores_np}
+    epi = {"done": done_np, "reward": rew_np, "score": scores_np}
     return next_obs_dict, step_record, h0, h1, epi, forced_reset
 
 
@@ -252,15 +170,11 @@ def run_eval(net, cfg, device, n_episodes=16, greedy=True):
     Run a small number of single-env evaluation games and return
     (mean, median, max) episode scores.
 
-    Uses the same HanabiGym2P wrapper as training, but decoupled from
-    AsyncVectorEnv / logging weirdness.
+    Uses the same HanabiEnv2P wrapper as training.
     """
-    from hanabi_envs import HanabiGym2P
-    import numpy as np
-    import torch
 
     # Single eval env, same game config as training
-    eval_env = HanabiGym2P(
+    eval_env = HanabiEnv2P(
         seed=cfg.seed + 12345,
         obs_conf=cfg.obs_mode,
         players=cfg.hanabi.players,
@@ -279,17 +193,16 @@ def run_eval(net, cfg, device, n_episodes=16, greedy=True):
     with torch.no_grad():
         for ep in range(n_episodes):
             # Different seed per eval episode for variety
-            obs_dict, _ = eval_env.reset(seed=cfg.seed + 1000 + ep)
+            obs_dict = eval_env.reset(seed=cfg.seed + 1000 + ep)
 
             # Per-seat GRU hidden banks, shape [1, 1, H]
             h0 = net.initial_state(1, device=device)
             h1 = net.initial_state(1, device=device)
 
             done = False
-            truncated = False
             score = 0.0
 
-            while not (done or truncated):
+            while not done:
                 # Torchify
                 obs   = torch.from_numpy(obs_dict["obs"]).to(device).float().unsqueeze(0)     # [1, obs_dim]
                 legal = torch.from_numpy(obs_dict["legal_mask"]).to(device).float().unsqueeze(0)  # [1, A]
@@ -320,7 +233,7 @@ def run_eval(net, cfg, device, n_episodes=16, greedy=True):
                 a_id = int(action.item())
 
                 # Step env
-                obs_dict, rew, done, truncated, info = eval_env.step(a_id)
+                obs_dict, rew, done, info = eval_env.step(a_id)
 
                 # Update hidden banks for the acting seat
                 if seat.item() == 0:
@@ -354,9 +267,8 @@ def main(cfg: CFG, args):
     print(f"[info] Hanabi {cfg.hanabi.colors}x{cfg.hanabi.ranks}, max score = {max_score}")
 
     # ---------- Environments ---------- #
-    env = make_vec_env(cfg.num_envs, cfg.seed, obs_conf=cfg.obs_mode,
-                       use_async=args.async_env, hanabi_cfg=cfg.hanabi)
-    obs_dict, _ = env.reset()
+    env = make_vec_env(cfg.num_envs, cfg.seed, obs_conf=cfg.obs_mode, hanabi_cfg=cfg.hanabi)
+    obs_dict = env.reset_all(seed0=cfg.seed)
     print("[debug] initial legal sums:", obs_dict["legal_mask"].sum(axis=1)[:8])
 
     # ---------- TensorBoard logging ---------- #
@@ -400,6 +312,9 @@ def main(cfg: CFG, args):
             print("[warn] optimizer state from ckpt not loaded (optimizer mismatch).")
         start_update = int(state.get("update", 0))
         print(f"[resume] loaded {args.ckpt} @ update {start_update}")
+    if args.start_update is not None:
+        start_update = int(args.start_update)
+        print(f"[override] forcing start_update to {start_update}")
 
     # ---------- RL bookkeeping ---------- #
     total_updates = args.total_updates or cfg.total_updates
@@ -428,51 +343,57 @@ def main(cfg: CFG, args):
         with torch.no_grad():
             for t in range(T):
                 obs_dict, step_rec, h0, h1, epi, forced_reset = do_step(
-                    env=env, net=net, device=device,
-                    h0=h0, h1=h1, obs_dict=obs_dict,
-                    debug=args.debug, eps=eps_now,
+                    env=env,
+                    net=net,
+                    device=device,
+                    h0=h0,
+                    h1=h1,
+                    obs_dict=obs_dict,
+                    debug=args.debug,
+                    eps=eps_now,
                 )
                 storage.add(step_rec)
 
-                # Treat forced resets as episode boundaries for logging only
                 if forced_reset.any():
                     ep_ret[forced_reset] = 0.0
                     ep_len[forced_reset] = 0
 
-                # Track shaped returns (for debugging / fallback)
                 ep_ret += epi["reward"]
                 ep_len += 1
 
                 if np.any(epi["done"]):
-                    done_ids = np.where(epi["done"])[0]
+                    done_ids = np.where(epi["done"])[0].tolist()
 
-                    # Score = sum of per-step shaped rewards over the episode
                     ep_returns = ep_ret[done_ids]
 
                     if args.debug:
-                        print("[DEBUG TRAIN] done_ids:", done_ids,
-                            "ep_returns_at_done:", ep_returns)
+                        print("[DEBUG TRAIN] done_ids:", done_ids, "ep_returns_at_done:", ep_returns)
                         if (ep_returns < -1e-6).any() or (ep_returns > max_score + 1e-6).any():
-                            raise AssertionError(f"Episode return out of range: {ep_returns} (max_score={max_score})")
+                            raise AssertionError(
+                                f"Episode return out of range: {ep_returns} (max_score={max_score})"
+                            )
 
                     ret_hist.extend(ep_returns.tolist())
                     ep_ret[done_ids] = 0.0
                     ep_len[done_ids] = 0
 
-
+                    fresh = env.reset_indices(done_ids)
+                    for slot, j in enumerate(done_ids):
+                        o = fresh[slot]
+                        obs_dict["obs"][j] = o["obs"].astype(np.float32, copy=False)
+                        obs_dict["legal_mask"][j] = o["legal_mask"].astype(np.float32, copy=False)
+                        obs_dict["seat"][j] = np.int64(o["seat"])
+                        obs_dict["prev_other_action"][j] = np.int64(o["prev_other_action"])
 
                 global_env_steps += N
 
             # ---- Bootstrap value at last state (for GAE tail) ----
-            obs_t   = torch.from_numpy(obs_dict["obs"]).to(device).float()       # [N, obs_dim]
-            seat_t  = torch.from_numpy(obs_dict["seat"]).to(device).long()       # [N]
-            prev_t  = torch.from_numpy(obs_dict["prev_other_action"]).to(device).long()  # [N]
-            h_in_T  = torch.where(seat_t.view(1, -1, 1) == 0, h0, h1)            # [1, N, H]
+            obs_t = torch.from_numpy(obs_dict["obs"]).to(device).float()  # [N, obs_dim]
+            seat_t = torch.from_numpy(obs_dict["seat"]).to(device).long()  # [N]
+            prev_t = torch.from_numpy(obs_dict["prev_other_action"]).to(device).long()  # [N]
+            h_in_T = torch.where(seat_t.view(1, -1, 1) == 0, h0, h1)  # [1, N, H]
             _, v_boot, _ = net(
-                obs_vec=obs_t.unsqueeze(1),
-                seat=seat_t.unsqueeze(1),
-                prev_other=prev_t.unsqueeze(1),
-                h=h_in_T
+                obs_vec=obs_t.unsqueeze(1), seat=seat_t.unsqueeze(1), prev_other=prev_t.unsqueeze(1), h=h_in_T
             )
             v_boot = v_boot.squeeze(1)  # [N]
 
@@ -514,67 +435,40 @@ def main(cfg: CFG, args):
                 train_count = 0
                 train_max  = 0.0
 
-            # --- Eval pass: trustworthy scores using single env ---
-            eval_mean = eval_med = eval_max = 0.0
-            if args.async_env:
-                try:
-                    eval_mean, eval_med, eval_max = run_eval(
-                        net, cfg, device, n_episodes=16, greedy=True
-                    )
-                except Exception as e:
-                    print(f"[warn] eval run failed: {e}", flush=True)
-
-            # For printing:
-            # - sync: R/ep(...) = training stats (same as before)
-            # - async: R/ep(...) = eval stats, and we also show train_R/... separately
-            if args.async_env:
-                r_mean = eval_mean
-                r_med  = eval_med
-                r_count = train_count  # still show how many train eps we saw
-                r_max  = eval_max
-            else:
-                r_mean = train_mean
-                r_med  = train_med
-                r_count = train_count
-                r_max  = train_max
+            # For printing: sync stats only
+            r_mean = train_mean
+            r_med  = train_med
+            r_count = train_count
+            r_max  = train_max
 
             time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-            if args.async_env:
-                # async: R/ep = eval; training stats printed separately
-                print(
-                    f"[{time_str}] [upd {update+1:05d}/{total_updates:05d}] "
-                    f"env_steps={global_env_steps:,} "
-                    f"R/ep(mean,eval)={r_mean:.2f} "
-                    f"R/ep(med,eval)={r_med:.2f} "
-                    f"R/ep(max,eval)={r_max:.2f} "
-                    f"train_R/ep(mean,last100)={train_mean:.2f} "
-                    f"train_R/ep(med,last100)={train_med:.2f} "
-                    f"train_R/ep(count,last100)={train_count} "
-                    f"train_R/ep(max,last100)={train_max:.2f} "
-                    f"loss_pi={logs['loss_pi']:.3f} "
-                    f"loss_v={logs['loss_v']:.3f} "
-                    f"total_loss={total_loss:.3f} "
-                    f"entropy={logs['entropy']:.3f} "
-                    f"clipfrac={logs['clip_frac']:.2f} "
-                    f"fps~{fps}"
-                )
-            else:
-                # sync: keep old-format R/ep from training
-                print(
-                    f"[{time_str}] [upd {update+1:05d}/{total_updates:05d}] "
-                    f"env_steps={global_env_steps:,} "
-                    f"R/ep(mean,last100)={r_mean:.2f} "
-                    f"R/ep(med,last100)={r_med:.2f} "
-                    f"R/ep(count,last100)={r_count} "
-                    f"R/ep(max,last100)={r_max:.2f} "
-                    f"loss_pi={logs['loss_pi']:.3f} "
-                    f"loss_v={logs['loss_v']:.3f} "
-                    f"total_loss={total_loss:.3f} "
-                    f"entropy={logs['entropy']:.3f} "
-                    f"clipfrac={logs['clip_frac']:.2f} "
-                    f"fps~{fps}"
-                )
+            print(
+                f"[{time_str}] [upd {update+1:05d}/{total_updates:05d}] "
+                f"env_steps={global_env_steps:,} "
+                f"R/ep(mean,last100)={r_mean:.2f} "
+                f"R/ep(med,last100)={r_med:.2f} "
+                f"R/ep(count,last100)={r_count} "
+                f"R/ep(max,last100)={r_max:.2f} "
+                f"loss_pi={logs['loss_pi']:.3f} "
+                f"loss_v={logs['loss_v']:.3f} "
+                f"total_loss={total_loss:.3f} "
+                f"entropy={logs['entropy']:.3f} "
+                f"clipfrac={logs['clip_frac']:.2f} "
+                f"fps~{fps}"
+            )
+
+            tb_writer.add_scalar("charts/ep_return_mean", r_mean, global_env_steps)
+            tb_writer.add_scalar("charts/ep_return_med", r_med, global_env_steps)
+            tb_writer.add_scalar("charts/ep_return_max", r_max, global_env_steps)
+
+            tb_writer.add_scalar("losses/loss_pi", logs["loss_pi"], global_env_steps)
+            tb_writer.add_scalar("losses/loss_v", logs["loss_v"], global_env_steps)
+            tb_writer.add_scalar("losses/entropy", logs["entropy"], global_env_steps)
+            tb_writer.add_scalar("losses/clip_frac", logs["clip_frac"], global_env_steps)
+            tb_writer.add_scalar("losses/total_loss", total_loss, global_env_steps)
+            tb_writer.flush()
+
 
 
         # ---- Checkpointing ----
@@ -607,6 +501,20 @@ if __name__ == "__main__":
         cfg.total_updates = args.total_updates
     if args.save_dir is not None:
         cfg.out_dir = args.save_dir
+    if args.seq_len is not None:
+        cfg.ppo.seq_len = args.seq_len
+    if args.num_envs is not None:
+        cfg.num_envs = args.num_envs
+    if args.unroll_T is not None:
+        cfg.unroll_T = args.unroll_T
+    if args.obs_mode is not None:
+        cfg.obs_mode = args.obs_mode
+    if args.save_interval is not None:
+        cfg.save_interval = args.save_interval
+    if args.log_interval is not None:
+        cfg.log_interval = args.log_interval
+    if args.seed is not None:
+        cfg.seed = args.seed
 
     # Variant → sizes
     if args.variant == "twoxtwo":
@@ -619,9 +527,5 @@ if __name__ == "__main__":
         cfg.hanabi.colors = 5
         cfg.hanabi.ranks = 5
         cfg.hanabi.hand_size = 5
-
-    # On macOS, default to SyncVectorEnv unless user explicitly asks for async
-    if IS_DARWIN and not args.async_env:
-        print("[info] macOS detected: using SyncVectorEnv (set --async-env to override)")
 
     main(cfg, args)
