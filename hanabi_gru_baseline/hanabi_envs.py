@@ -1,95 +1,92 @@
 # hanabi_envs.py
 # -----------------------------------------------------------------------------
-# HanabiGym2P over DeepMind rl_env.HanabiEnv (2 players), observation-driven.
+# Gym-free wrappers around DeepMind's rl_env.HanabiEnv plus a simple vector env.
 # -----------------------------------------------------------------------------
 
 from __future__ import annotations
+
 import os
+from typing import Any, Dict, Iterable, List, Sequence, Tuple
+
 import numpy as np
-import gymnasium as gym
-from gymnasium import spaces
 from hanabi_learning_environment import rl_env
 
-# Debug prints (export HANABI_DEBUG=1 to enable)
 _DEBUG = bool(int(os.environ.get("HANABI_DEBUG", "0")))
 
 
-class HanabiGym2P(gym.Env):
+class HanabiEnv2P:
     """
-    Gymnasium-compatible wrapper around DeepMind's rl_env.HanabiEnv for 2-player Hanabi.
+    Canonical single-environment wrapper for 2-player Hanabi (DeepMind HLE).
 
-    Observations:
-      - "obs": flat float32 vector (DeepMind "vectorized" obs for the current player)
-      - "legal_mask": float32[ num_moves ] with 1.0 for legal action ids, 0.0 otherwise
-      - "seat": int {0,1}, the current player index
-      - "prev_other_action": int in [0..num_moves] where num_moves is a sentinel "none"
+    API:
+      reset(seed=None) -> obs_dict
+      step(action_id) -> obs_dict, reward, done, info
 
-    Actions:
-      action_id in [0..num_moves-1], with layout:
-        0..H-1           : PLAY card_index = i
-        H..2H-1          : DISCARD card_index = i-H
-        2H..2H+C-1       : REVEAL_COLOR color = i-(2H)
-        2H+C..2H+C+R-1   : REVEAL_RANK  rank  = i-(2H+C)
+    Observations (np arrays / ints):
+      - "obs": float32[obs_dim]    (vectorized observation for current player)
+      - "legal_mask": float32[num_moves] with 1.0 for legal ids, 0 otherwise
+      - "seat": int {0,1}          (current player)
+      - "prev_other_action": int in [0..num_moves] where num_moves is sentinel
     """
 
-    metadata = {"render_modes": []}
-
-    def __init__(self, seed, obs_conf,
-                 players=2, colors=5, ranks=5, hand_size=5,
-                 max_information_tokens=8, max_life_tokens=3,
-                 random_start_player=False):
-        super().__init__()
+    def __init__(
+        self,
+        seed: int,
+        obs_conf: str,
+        *,
+        players: int = 2,
+        colors: int = 5,
+        ranks: int = 5,
+        hand_size: int = 5,
+        max_information_tokens: int = 8,
+        max_life_tokens: int = 3,
+        random_start_player: bool = False,
+    ):
         self.players = players
         self.colors = colors
         self.ranks = ranks
         self.hand_size = hand_size
 
         # Underlying DeepMind rl_env
-        self._env = rl_env.HanabiEnv(config={
-            "players": players,
-            "colors": colors,
-            "ranks": ranks,
-            "hand_size": hand_size,
-            "max_information_tokens": max_information_tokens,
-            "max_life_tokens": max_life_tokens,
-            "random_start_player": random_start_player,
-            "seed": seed,
-        })
+        self._env = rl_env.HanabiEnv(
+            config={
+                "players": players,
+                "colors": colors,
+                "ranks": ranks,
+                "hand_size": hand_size,
+                "max_information_tokens": max_information_tokens,
+                "max_life_tokens": max_life_tokens,
+                "random_start_player": random_start_player,
+                "seed": seed,
+            }
+        )
 
-        # --- probe real vectorized obs length once, set stable obs space ---
-        obs_dim = 1
+        # Probe vectorized obs length once to set a stable obs_dim
+        self.obs_dim = 1
         try:
             _probe = self._env.reset()
             _seat = int(_probe.get("current_player", 0))
             _pov = _probe["player_observations"][_seat]
             _vec = np.asarray(_pov.get("vectorized", []), dtype=np.float32)
             if _vec.ndim == 1 and _vec.size > 0:
-                obs_dim = int(_vec.size)
+                self.obs_dim = int(_vec.size)
         except Exception:
             pass
 
-        # --- dynamic action layout ---
-        self._a_play0         = 0
-        self._a_discard0      = self._a_play0 + hand_size
+        # Action layout
+        self._a_play0 = 0
+        self._a_discard0 = self._a_play0 + hand_size
         self._a_reveal_color0 = self._a_discard0 + hand_size
-        self._a_reveal_rank0  = self._a_reveal_color0 + colors
+        self._a_reveal_rank0 = self._a_reveal_color0 + colors
 
         self.num_moves = 2 * hand_size + colors + ranks
-        self.sentinel_none = self.num_moves      # sentinel for "no previous action"
+        self.sentinel_none = self.num_moves  # sentinel for "no previous action"
         self._hint_target_offset = 1 if players > 1 else 0
-
-        self.observation_space = spaces.Dict({
-            "obs": spaces.Box(-np.inf, np.inf, shape=(obs_dim,), dtype=np.float32),
-            "legal_mask": spaces.Box(0.0, 1.0, shape=(self.num_moves,), dtype=np.float32),
-            "seat": spaces.Discrete(players),
-            "prev_other_action": spaces.Discrete(self.num_moves + 1),
-        })
-        self.action_space = spaces.Discrete(self.num_moves)
 
         # Runtime state
         self._last_obs = None
-        self._score_accum = 0.0   # running sum of rewards (our notion of score)
-        self.prev_action = [self.sentinel_none for _ in range(self.players)]  # per-seat last action id
+        self._score_accum = 0.0
+        self.prev_action = [self.sentinel_none for _ in range(self.players)]
         self.turn_count = 0
 
     # ----------------------------- Utilities -------------------------------- #
@@ -148,10 +145,8 @@ class HanabiGym2P(gym.Env):
         if t == "DISCARD":
             return self._a_discard0 + int(a["card_index"])
         if t == "REVEAL_COLOR":
-            # rl_env color is typically 0..colors-1 (or a letter); handle both
             return self._a_reveal_color0 + self._parse_color(a.get("color", 0))
         if t == "REVEAL_RANK":
-            # rl_env rank is usually 1..ranks
             rank1 = int(a.get("rank", 1))
             return self._a_reveal_rank0 + (rank1 - 1)
         raise ValueError(f"Unknown action dict: {a}")
@@ -197,7 +192,7 @@ class HanabiGym2P(gym.Env):
 
         return self._id_from_rl_action(a) == gid
 
-    # ------------------------------- Gym API -------------------------------- #
+    # ------------------------------- API ------------------------------------ #
     def _reset_world(self, seed=None):
         try:
             obs = self._env.reset(seed=seed) if seed is not None else self._env.reset()
@@ -214,18 +209,17 @@ class HanabiGym2P(gym.Env):
         """Return action type string from rl_env action dict."""
         return a.get("action_type", a.get("type", None))
 
-    def reset(self, *, seed: int | None = None, options: dict | None = None):
+    def reset(self, *, seed: int | None = None):
         obs = self._reset_world(seed)
-        return self._pack_obs(obs), {}
+        return self._pack_obs(obs)
 
     def step(self, a_id: int):
-        # Build legal mask from last obs; choose matching action dict
         legal = self._legal_moves_from_obs(self._last_obs)
         if not legal:
             # Defensive reset (should be rare)
             obs = self._reset_world()
             info = {"score": float(self._score_accum)}
-            return self._pack_obs(obs), 0.0, False, False, info
+            return self._pack_obs(obs), 0.0, False, info
 
         choice = None
         for a in legal:
@@ -239,21 +233,15 @@ class HanabiGym2P(gym.Env):
         next_obs, env_rew, done, info = self._env.step(choice)
         self._last_obs = next_obs
 
-        # Reward shaping: ensure non-negative reward increments
-        # DeepMind Hanabi's reward is typically the score delta, but we clamp to >= 0.
         shaped = float(max(0.0, float(env_rew)))
-
-        # Accumulate shaped reward as our notion of "score"
         self._score_accum += shaped
 
-        # Make sure info is a dict and always carries the current accumulated score
         if info is None:
             info = {}
         if not isinstance(info, dict):
             info = dict(info)
         info["score"] = float(self._score_accum)
 
-        # prev action bookkeeping:
         seat_now = self._seat_from_obs(next_obs)
         just_acted = (seat_now - 1) % self.players
         if 0 <= just_acted < self.players:
@@ -261,8 +249,7 @@ class HanabiGym2P(gym.Env):
 
         self.turn_count += 1
         terminated = bool(done)
-        truncated = False
-        return self._pack_obs(next_obs), shaped, terminated, truncated, info
+        return self._pack_obs(next_obs), shaped, terminated, info
 
     # ------------------------------ Packing --------------------------------- #
     def _pack_obs(self, obs: dict) -> dict:
@@ -273,8 +260,8 @@ class HanabiGym2P(gym.Env):
             pov = obs["player_observations"][seat]
             obs_vec = np.asarray(pov.get("vectorized", []), dtype=np.float32)
             if obs_vec.ndim != 1 or obs_vec.size == 0:
-                obs_vec = np.zeros((self.observation_space["obs"].shape[0],), dtype=np.float32)
-            target = self.observation_space["obs"].shape[0]
+                obs_vec = np.zeros((self.obs_dim,), dtype=np.float32)
+            target = self.obs_dim
             if obs_vec.size != target:
                 if obs_vec.size > target:
                     obs_vec = obs_vec[:target]
@@ -283,9 +270,8 @@ class HanabiGym2P(gym.Env):
                     pad[:obs_vec.size] = obs_vec
                     obs_vec = pad
         except Exception:
-            obs_vec = np.zeros((self.observation_space["obs"].shape[0],), dtype=np.float32)
+            obs_vec = np.zeros((self.obs_dim,), dtype=np.float32)
 
-        # Legal mask from rl_env legal moves
         legal_mask = np.zeros((self.num_moves,), dtype=np.float32)
         try:
             for a in self._legal_moves_from_obs(obs):
@@ -295,12 +281,89 @@ class HanabiGym2P(gym.Env):
         except Exception:
             pass
 
-        # Previous action by the opponent (already sentinel-initialized on first move)
         prev_other = self.prev_action[(seat + 1) % self.players]
 
         return {
-            "obs": obs_vec,
-            "legal_mask": legal_mask,
+            "obs": obs_vec.astype(np.float32, copy=False),
+            "legal_mask": legal_mask.astype(np.float32, copy=False),
             "seat": int(seat),
             "prev_other_action": int(prev_other),
         }
+
+
+def stack_obs_list(obs_list: Sequence[Dict[str, Any]]) -> Dict[str, np.ndarray]:
+    """Stack a list of obs dicts into batched numpy arrays."""
+    if not obs_list:
+        raise ValueError("obs_list is empty")
+    keys = obs_list[0].keys()
+    batched: Dict[str, np.ndarray] = {}
+    for k in keys:
+        vals = [obs[k] for obs in obs_list]
+        if isinstance(vals[0], np.ndarray):
+            batched[k] = np.stack(vals, axis=0)
+        else:
+            batched[k] = np.asarray(vals)
+    return batched
+
+
+class HanabiVecEnvSync:
+    """Simple synchronous vectorized env wrapper that owns multiple HanabiEnv2P."""
+
+    def __init__(self, n_envs: int, seed0: int, obs_conf: str, hanabi_cfg) -> None:
+        self.envs: List[HanabiEnv2P] = [
+            HanabiEnv2P(
+                seed=seed0 + i,
+                obs_conf=obs_conf,
+                players=hanabi_cfg.players,
+                colors=hanabi_cfg.colors,
+                ranks=hanabi_cfg.ranks,
+                hand_size=hanabi_cfg.hand_size,
+                max_information_tokens=hanabi_cfg.max_information_tokens,
+                max_life_tokens=hanabi_cfg.max_life_tokens,
+                random_start_player=hanabi_cfg.random_start_player,
+            )
+            for i in range(n_envs)
+        ]
+
+    @property
+    def num_envs(self) -> int:
+        return len(self.envs)
+
+    def reset_all(self, seed0: int | None = None) -> Dict[str, np.ndarray]:
+        obs_list = []
+        for i, env in enumerate(self.envs):
+            seed = None if seed0 is None else seed0 + i
+            obs_list.append(env.reset(seed=seed))
+        return stack_obs_list(obs_list)
+
+    def step_all(
+        self, actions: Sequence[int]
+    ) -> Tuple[Dict[str, np.ndarray], np.ndarray, np.ndarray, List[Dict[str, Any]]]:
+        obs_list: List[Dict[str, Any]] = []
+        rew_list: List[float] = []
+        done_list: List[bool] = []
+        info_list: List[Dict[str, Any]] = []
+
+        for env, a in zip(self.envs, actions):
+            o, r, d, info = env.step(int(a))
+            obs_list.append(o)
+            rew_list.append(float(r))
+            done_list.append(bool(d))
+            info_list.append(info)
+
+        batched_obs = stack_obs_list(obs_list)
+        rewards = np.asarray(rew_list, dtype=np.float32)
+        dones = np.asarray(done_list, dtype=bool)
+        return batched_obs, rewards, dones, info_list
+
+    def reset_indices(self, idxs: Iterable[int]) -> List[Dict[str, Any]]:
+        fresh: List[Dict[str, Any]] = []
+        for i in idxs:
+            fresh.append(self.envs[int(i)].reset())
+        return fresh
+
+
+# Backwards-compatible alias for older name
+HanabiGym2P = HanabiEnv2P
+
+__all__ = ["HanabiEnv2P", "HanabiGym2P", "HanabiVecEnvSync", "stack_obs_list"]

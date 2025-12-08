@@ -14,6 +14,8 @@ DEBUG="${DEBUG:-0}"          # 1 to pass --debug
 ASYNC_ENV=1                  # always async in this script
 VARIANT="${VARIANT:-standard}" # twoxtwo | standard
 NUM_ENVS="${NUM_ENVS:-24}"  # number of parallel envs/workers (the parameter you asked about)
+SEQ_LEN="${SEQ_LEN:-}"      # optional PPO seq_len override
+START_UPDATE="${START_UPDATE:-}" # optional override for starting update counter
 
 # Additional config visibility (defined in config.py; change there to affect runs)
 SEED="${SEED:-67}"
@@ -40,6 +42,14 @@ CMD=(python -u train.py
 
 [[ -n "$CKPT" ]] && CMD+=(--ckpt "$CKPT")
 [[ "$DEBUG" -eq 1 ]] && CMD+=(--debug)
+[[ -n "$SEQ_LEN" ]] && CMD+=(--seq-len "$SEQ_LEN")
+[[ -n "$NUM_ENVS" ]] && CMD+=(--num-envs "$NUM_ENVS")
+[[ -n "$UNROLL_T" ]] && CMD+=(--unroll-T "$UNROLL_T")
+[[ -n "$OBS_MODE" ]] && CMD+=(--obs-mode "$OBS_MODE")
+[[ -n "$SAVE_INTERVAL" ]] && CMD+=(--save-interval "$SAVE_INTERVAL")
+[[ -n "$LOG_INTERVAL" ]] && CMD+=(--log-interval "$LOG_INTERVAL")
+[[ -n "$SEED" ]] && CMD+=(--seed "$SEED")
+[[ -n "$START_UPDATE" ]] && CMD+=(--start-update "$START_UPDATE")
 
 # Log launch configuration for reproducibility
 {

@@ -1,9 +1,10 @@
 # eval_random_2x2.py
 import numpy as np
-from hanabi_envs import HanabiGym2P
+from hanabi_envs import HanabiEnv2P
+
 
 def main():
-    env = HanabiGym2P(
+    env = HanabiEnv2P(
         seed=123,
         obs_conf="minimal",
         players=2,
@@ -18,13 +19,13 @@ def main():
     num_games = 100
     scores = []
     for g in range(num_games):
-        obs, _ = env.reset()
+        obs = env.reset()
         done = False
         total_rew = 0.0
         while not done:
             legal = np.where(obs["legal_mask"] > 0)[0]
             a = int(np.random.choice(legal))
-            obs, r, done, trunc, info = env.step(a)
+            obs, r, done, info = env.step(a)
             total_rew += r
         score = info.get("score", None)
         print(f"Game {g}: score={score}, total_rew={total_rew}")
@@ -32,6 +33,7 @@ def main():
 
     print("Scores:", scores)
     print("Mean score:", np.mean(scores))
+
 
 if __name__ == "__main__":
     main()

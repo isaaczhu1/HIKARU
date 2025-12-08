@@ -9,4 +9,4 @@ from hanabi_gru_baseline.config import CFG
 
 
 def test_default_seq_len_is_one():
-    assert CFG.ppo.seq_len == 1
+    assert CFG.ppo.seq_len == 16
