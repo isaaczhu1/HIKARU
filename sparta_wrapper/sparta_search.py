@@ -20,6 +20,11 @@ class SpartaConfig:
     max_depth: int | None = 25
     max_actions: int | None = 6
 
+class SpartaWrapper:
+    def __init__(self, blueprint_factory: Callable[[], object], config: SpartaConfig | None = None) -> None:
+
+
+
 
 class SpartaSingleAgent:
     """One-ply Monte Carlo search wrapper around a blueprint policy."""

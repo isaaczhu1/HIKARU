@@ -199,6 +199,14 @@ def sample_world_state(
 
     it = 0
     while len(samples) < takes:
+        
+        if it >= max_attempts:
+            # print(f"Failed to generate, pumping out {takes - len(samples)} samples.")
+            # fill with anything
+            fill_hands = _sample_hand(remaining_deck, knowledge, HANABI_GAME_CONFIG["hand_size"], rng, takes - len(samples))
+            samples.extend(fill_hands)
+            break
+            
         upstream_takes = (takes - len(samples)) * upstream_factor
         candidate_hands = _sample_hand(remaining_deck, knowledge, HANABI_GAME_CONFIG["hand_size"], rng, upstream_takes)
 
@@ -208,20 +216,14 @@ def sample_world_state(
             # print(last_move["move"])
             # print("Predicted move dict:", predicted_move_dict)
             if last_move["move"] == predicted_move_dict:
-                print("Accepted hand:", hand)
+                # print("Accepted hand:", hand)
                 samples.append(hand)
-            else:
-                print("Rejected hand:", hand)
+            # else:
+            #    print("Rejected hand:", hand)
             if len(samples) >= takes:
                 break
 
         it += 1
-        if it >= max_attempts:
-            print(f"Failed to generate, pumping out {takes - len(samples)} samples.")
-            # fill with anything
-            fill_hands = _sample_hand(remaining_deck, knowledge, HANABI_GAME_CONFIG["hand_size"], rng, takes - len(samples))
-            samples.extend(fill_hands)
-            break
 
     return samples[:takes]
 
