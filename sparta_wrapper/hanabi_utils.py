@@ -184,11 +184,54 @@ def build_observation(state: pyhanabi.HanabiState, player_id: int) -> HanabiObse
         last_moves=last_moves,
     )
 
+class HanabiLookback1:
+    def __init__(self, partial_config, seed):
+        # seed the config
+        self.config = partial_config.copy()
+        self.config["seed"] = seed
+
+        self.cur_game = pyhanabi.HanabiGame(self.config)
+        self.cur_state = self.cur_game.new_initial_state()
+        _advance_chance_events(self.cur_state)
+
+        # lookback shit
+        self.prev_game = None
+        self.prev_state = None
+
+        # move buffer
+        self.last_move = None
+
+    def apply_move(self, move):
+        # if no previous state, init it
+        if self.prev_state is None:
+            self.prev_game = pyhanabi.HanabiGame(self.config)
+            self.prev_state = self.prev_game.new_initial_state()
+            _advance_chance_events(self.prev_state)
+
+        # cum
+        self.cur_state.apply_move(move)
+        _advance_chance_events(self.cur_state)
+
+        if self.last_move:
+            self.prev_state.apply_move(self.last_move)
+            _advance_chance_events(self.prev_state)
+
+        # print("===== applied move =====")
+        # print(move, self.last_move)
+        # print("Current player:", self.cur_state.cur_player())
+        # print("Previous player:", self.prev_state.cur_player())
+        # print("=========================")
+
+        self.last_move = move
+        
+
 
 __all__ = [
     "HanabiObservation",
+    "HanabiLookback1",
     "build_observation",
     "_advance_chance_events",
     "_move_to_action_dict",
     "_action_dict_to_move",
 ]
+
