@@ -13,7 +13,7 @@ from sparta_wrapper.hanabi_utils import HanabiObservation, _advance_chance_event
 class SignalBlueprint:
     """Signal by looking at the next player's first card."""
 
-    def act(self, observation: HanabiObservation) -> pyhanabi.HanabiMove:
+    def act(self, observation: HanabiObservation, rng: random.Random) -> pyhanabi.HanabiMove:
         partner = (observation.current_player_offset + 1) % len(observation.observed_hands)
         partner_hand = observation.observed_hands[partner]
         if not partner_hand:

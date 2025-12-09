@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Sequence
 from hanabi_learning_environment import pyhanabi
 
 from sparta_wrapper.hanabi_utils import HanabiObservation
+import random
 
 
 @dataclass
@@ -27,7 +28,7 @@ class HeuristicBlueprint:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def act(self, observation: HanabiObservation) -> pyhanabi.HanabiMove:
+    def act(self, observation: HanabiObservation, rng: random.Random) -> pyhanabi.HanabiMove:
         """Select an action consistent with the heuristic rules."""
 
         # Rule 1: play a card we know is playable.

@@ -39,9 +39,9 @@ class CFG:
 
     class hanabi:
         players = 2
-        colors = 2       # twoxtwo
-        ranks = 2        # twoxtwo
-        hand_size = 2    # twoxtwo
+        colors = 5       # standard
+        ranks = 5        # standard
+        hand_size = 5    # standard
         max_information_tokens = 8
         max_life_tokens = 3
         random_start_player = False

@@ -38,12 +38,18 @@ def _history_item_to_dict(item: pyhanabi.HanabiHistoryItem) -> Dict[str, Any]:
     return payload
 
 
-def _knowledge_to_dict(knowledge: pyhanabi.HanabiCardKnowledge) -> Dict[str, Any]:
+def _knowledge_to_dict(
+    knowledge: pyhanabi.HanabiCardKnowledge, num_colors: int = 5, num_ranks: int = 5
+) -> Dict[str, Any]:
     color_idx = knowledge.color()
     rank_idx = knowledge.rank()
     color = pyhanabi.COLOR_CHAR[color_idx] if isinstance(color_idx, int) else None
     rank = int(rank_idx) if isinstance(rank_idx, int) else None
-    return {"color": color, "rank": rank}
+    mask = [
+        [bool(knowledge.color_plausible(c) and knowledge.rank_plausible(r)) for r in range(num_ranks)]
+        for c in range(num_colors)
+    ]
+    return {"color": color, "rank": rank, "mask": mask}
 
 
 def _move_to_action_dict(move: pyhanabi.HanabiMove) -> Dict[str, Any]:
@@ -158,10 +164,13 @@ class HanabiObservation:
 def build_observation(state: pyhanabi.HanabiState, player_id: int) -> HanabiObservation:
     """Construct a structured observation for ``player_id`` from a state."""
     obs = state.observation(player_id)
+    num_colors = len(obs.fireworks())
+    num_ranks = 5  # standard Hanabi; extend if needed
     legal_moves = obs.legal_moves()
     observed_hands = [_hand_to_dict(hand) for hand in obs.observed_hands()]
     card_knowledge = [
-        [_knowledge_to_dict(k) for k in player_knows] for player_knows in obs.card_knowledge()
+        [_knowledge_to_dict(k, num_colors=num_colors, num_ranks=num_ranks) for k in player_knows]
+        for player_knows in obs.card_knowledge()
     ]
     discard_pile = [_card_to_dict(card) for card in obs.discard_pile()]
     fireworks = _fireworks_to_dict(obs.fireworks())
@@ -234,4 +243,3 @@ __all__ = [
     "_move_to_action_dict",
     "_action_dict_to_move",
 ]
-
