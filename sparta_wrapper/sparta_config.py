@@ -5,5 +5,4 @@ HANABI_GAME_CONFIG = {
     "hand_size": 3,
     "max_information_tokens": 8,
     "max_life_tokens": 3,
-    "seed": 0,
 }

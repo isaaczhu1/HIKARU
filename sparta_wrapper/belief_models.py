@@ -11,6 +11,7 @@ from hanabi_learning_environment import pyhanabi
 from sparta_wrapper.hanabi_utils import (
     HanabiObservation,
     _action_dict_to_move,
+    _move_to_action_dict,
     build_observation,
 )
 
@@ -25,6 +26,7 @@ for color in range(_GAME_TEMPLATE.num_colors()):
         for _ in range(count):
             ALL_CARDS.append((color, rank))
 
+# tested
 def _iter_all_hands(remaining_deck, knowledge, hand_size: int = HANABI_GAME_CONFIG["hand_size"]):
     """Generate all possible hands from remaining_deck."""
     if hand_size == 0:
@@ -32,6 +34,7 @@ def _iter_all_hands(remaining_deck, knowledge, hand_size: int = HANABI_GAME_CONF
         return
     for i, card in enumerate(remaining_deck):
         # check if card is plausible
+        # print(card, knowledge[-hand_size], knowledge[-hand_size].color_plausible(card[0]), knowledge[-hand_size].rank_plausible(card[1]))
         if not knowledge[-hand_size].color_plausible(card[0]):
             continue
         if not knowledge[-hand_size].rank_plausible(card[1]):
@@ -39,20 +42,104 @@ def _iter_all_hands(remaining_deck, knowledge, hand_size: int = HANABI_GAME_CONF
         # check if card still exists
         if remaining_deck[card] <= 0:
             continue
+        # print("isHaram", hand_size, i, card)
         next_deck = remaining_deck.copy()
+        # print(next_deck)
         next_deck[card] -= 1
         if next_deck[card] == 0:
             del next_deck[card]
         for sub_hand in _iter_all_hands(next_deck, knowledge, hand_size - 1):
             yield [card] + sub_hand
 
+# tested
+def _hand_multiplicity(remaining_deck, hand):
+    """Count how many ways the given hand can be drawn from remaining_deck."""
+    hand_cts = {}
+    for card in hand:
+        hand_cts[card] = hand_cts.get(card, 0) + 1
+    mult = 1
+    for card, ct in hand_cts.items():
+        if remaining_deck.get(card, 0) < ct:
+            return 0
+        # compute n choose k
+        n = remaining_deck[card]
+        k = ct
+        numer = 1
+        denom = 1
+        for i in range(k):
+            numer *= n - i
+            denom *= i + 1
+        mult *= numer // denom
+    return mult
+
+# tested
+def _sample_hand(remaining_deck, knowledge, hand_size, rng, takes):
+    """Approximate sampling of a plausible hand using the distinct-hand iterator."""
+    samples = [None for _ in range(takes)]
+    idx = 0
+    for hand in _iter_all_hands(remaining_deck, knowledge, hand_size):
+        # Reservoir sampling to avoid materializing all hands.
+        multiplicity = _hand_multiplicity(remaining_deck, hand)
+        # print("hand", hand, "multiplicity", multiplicity)
+        # print("SUPER PISS", multiplicity, idx + multiplicity)
+        for take_idx in range(takes):
+            if idx == 0 or rng.random() < multiplicity / (idx + multiplicity):
+                samples[take_idx] = hand
+        idx += multiplicity
+    rng.shuffle(samples)
+    return samples
+
+
 from hanabi_learning_environment import pyhanabi
 from sparta_wrapper.hanabi_utils import build_observation
 from sparta_wrapper.heuristic_blueprint import HeuristicBlueprint  # or your blueprint
 
+
+def _legal_moves_for_player(obs: HanabiObservation, actor_id: int) -> List[pyhanabi.HanabiMove]:
+    """Rebuild legal moves assuming ``actor_id`` is to play given ``obs``."""
+    moves: List[pyhanabi.HanabiMove] = []
+    hand_size = len(obs.card_knowledge[actor_id])
+
+    for idx in range(hand_size):
+        moves.append(pyhanabi.HanabiMove.get_play_move(idx))
+        if obs.information_tokens < HANABI_GAME_CONFIG["max_information_tokens"]:
+            moves.append(pyhanabi.HanabiMove.get_discard_move(idx))
+
+    if obs.information_tokens > 0:
+        num_players = len(obs.observed_hands)
+        for offset in range(1, num_players):
+            target_id = (actor_id + offset) % num_players
+            target_hand = obs.observed_hands[target_id]
+            colors = {card["color"] for card in target_hand if card["color"] is not None}
+            ranks = {card["rank"] for card in target_hand if card["rank"] is not None}
+            for color in colors:
+                moves.append(
+                    pyhanabi.HanabiMove.get_reveal_color_move(
+                        offset, pyhanabi.color_char_to_idx(color)
+                    )
+                )
+            for rank in ranks:
+                moves.append(pyhanabi.HanabiMove.get_reveal_rank_move(offset, int(rank)))
+
+    # Deduplicate while preserving order to match pyhanabi move ordering expectations.
+    deduped: List[pyhanabi.HanabiMove] = []
+    seen = set()
+    for move in moves:
+        if move not in seen:
+            deduped.append(move)
+            seen.add(move)
+    return deduped
+
+
 def _predict_partner(blueprint_factory, state, my_id, partner_id, my_hand_guess):
     # my_hand_guess: list of (color_idx_or_char, rank)
     obs = build_observation(state, partner_id)
+
+    # Pretend it's the partner's turn; rebuild legal moves for that viewpoint.
+    obs.current_player = partner_id
+    obs.current_player_offset = 0
+    obs.legal_moves = _legal_moves_for_player(obs, partner_id)
+    obs.legal_moves_dict = [_move_to_action_dict(move) for move in obs.legal_moves]
 
     # Override what the partner sees in your hand with the hypothesis.
     obs.observed_hands[my_id] = [
@@ -70,62 +157,73 @@ def _predict_partner(blueprint_factory, state, my_id, partner_id, my_hand_guess)
 
 
 def sample_world_state(
-    last_belief: List[List[pyhanabi.HanabiCard]],
-    base_state: pyhanabi.HanabiState,
+    lagging_state: pyhanabi.HanabiState,
     obs: HanabiObservation,
     rng: random.Random,
     blueprint_factory: Callable[[], object] | None = None,
+    takes: int = 8,
+    upstream_factor: int = 5,
+    max_attempts: int = 100
 ) -> List[List[pyhanabi.HanabiCard]]:
     """Sample hidden hand + deck consistent with public info/hints and (optionally) last partner move.
 
-    If ``blueprint_factory`` is provided (which is the last actor's blueprint),
+    While max_attempts,
     we reject samples where the move is incompatible with the blueprint given the sampled hidden hand.
 
-    last_belief: last possible list of hands that could be held for this player.
+    If max_attempts = 0, this effectivelly nullifies the blueprint conditioning.
+
+    state: state before the move
     obs: the observation resulting from the move.
 
     Returns the updated list of compatible hands.
     """
-    cur_player_offset = obs.current_player_offset()
+    cur_player_offset = obs.current_player_offset
 
     if cur_player_offset == -1:
         raise ValueError("Bruh you're sampling world state on a chance node? Why?")
 
-    observer_id = (state.cur_player() - cur_player_offset + obs.num_players()) % obs.num_players()
-    knowledge = obs.raw_observation.card_knowledge()[observer_id]
+    num_players = HANABI_GAME_CONFIG["players"]
+
+    observer_id = (lagging_state.cur_player() + 1 - cur_player_offset + num_players) % num_players
+    knowledge = obs.raw_observation.card_knowledge()[0]
     remaining_deck = _compute_remaining_deck(obs)
     
-    last_move = obs.last_moves()[0]
-    valid_hand_prefixes = last_belief
+    ptr = 0
+    while obs.last_moves[ptr]["player"] == pyhanabi.CHANCE_PLAYER_ID:
+        ptr += 1
+        if ptr >= len(obs.last_moves):
+            raise ValueError("No last move found.")
+    last_move = obs.last_moves[ptr]
 
-    if cur_player_offset == 1:
-        # You made the last move.
-        if last_move.type() == pyhanabi.HanabiMoveType.REVEAL_COLOR or last_move.type() == pyhanabi.HanabiMoveType.REVEAL_RANK:
-            # Nothing happens.
-            return last_belief
-        else:
-            # acted position, last card
-            rem_position = last_move.card_index()
-            last_card = (last_move.color(), last_move.rank())
+    samples = []
 
-            # get new possible hand prefixes
-            valid_hand_prefixes = [belief[:rem_position] + belief[rem_position + 1:] 
-                                    for belief in last_belief if belief[rem_position] == last_card]
+    it = 0
+    while len(samples) < takes:
+        upstream_takes = (takes - len(samples)) * upstream_factor
+        candidate_hands = _sample_hand(remaining_deck, knowledge, HANABI_GAME_CONFIG["hand_size"], rng, upstream_takes)
 
-    for hand in _iter_all_hands(remaining_deck, knowledge):
-        # check that the last made move is consistent with this world state.
-        blueprint = blueprint_factory() if blueprint_factory is not None else None
+        for hand in candidate_hands:
+            predicted_move = _predict_partner(blueprint_factory, lagging_state, observer_id, lagging_state.cur_player(), hand)
+            predicted_move_dict = _move_to_action_dict(predicted_move)
+            # print(last_move["move"])
+            # print("Predicted move dict:", predicted_move_dict)
+            if last_move["move"] == predicted_move_dict:
+                print("Accepted hand:", hand)
+                samples.append(hand)
+            else:
+                print("Rejected hand:", hand)
+            if len(samples) >= takes:
+                break
 
-        
+        it += 1
+        if it >= max_attempts:
+            print(f"Failed to generate, pumping out {takes - len(samples)} samples.")
+            # fill with anything
+            fill_hands = _sample_hand(remaining_deck, knowledge, HANABI_GAME_CONFIG["hand_size"], rng, takes - len(samples))
+            samples.extend(fill_hands)
+            break
 
-        
-
-
-
-
-    raise NotImplementedError("todo")
-    
-
+    return samples[:takes]
 
 # seems ok
 def _compute_remaining_deck(obs: HanabiObservation) -> Dict[Card, int]:
