@@ -11,7 +11,7 @@ import random
 rng = random.Random(42)
 
 from sparta_wrapper.belief_models import sample_world_state, _iter_all_hands, _compute_remaining_deck, _predict_partner, _hand_multiplicity, _sample_hand, _iter_all_hands
-from sparta_wrapper.hanabi_utils import build_observation, HanabiLookback1
+from sparta_wrapper.hanabi_utils import build_observation, HanabiLookback1, unmask_card, fabricate
 from sparta_wrapper.hanabi_utils import HanabiObservation, _advance_chance_events, build_observation
 
 from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
@@ -150,7 +150,38 @@ def squid_game(seed):
     for f, k in frequencies.items():
         print(f, k)
 
+    for move in lookback1.cur_state.move_history():
+        print(move, move.player(), move.color(), move.rank())
+        if move.player() == -1:
+            print(unmask_card(move))
+        else:
+            print(move.move().type())
+
+    state = fabricate(lookback1.cur_state, 1, [(0, 2), (0, 2), (0, 0)])
+
+    for move in state.move_history():
+        print(move, move.player(), move.color(), move.rank())
+
 def octopus_activities(seed):
+    game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
+    state = game.new_initial_state()
+    obs = build_observation(state, 0)
+    print(state)
+    print(obs)
+    print(state.cur_player())
+    print("=====")
+    print(obs.__dict__)
+    print("====================")
+    print(dir(obs))
+    print(dir(game))
+
+    print("shit")
+
+    _advance_chance_events(state)
+    
+    print(state.player_hands())
+    for move in state.move_history():
+        print(move, move.player(), move.color(), move.rank(), unmask_card(move))
     pass
 
 if __name__ == "__main__":

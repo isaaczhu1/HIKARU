@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence
 
 from hanabi_learning_environment import pyhanabi
+from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
 
 
 def _card_to_dict(card: pyhanabi.HanabiCard) -> Dict[str, Any]:
@@ -111,6 +112,7 @@ def _advance_chance_events(state: pyhanabi.HanabiState, deck_override: list[pyha
 
 def _overwrite_last_deal(state: pyhanabi.HanabiState, before, deck_override: list[pyhanabi.HanabiCard]) -> None:
     """Find the newly dealt card slot and overwrite with supplied deck order."""
+    raise NotImplementedError("_overwrite_last_deal is deprecated")
     if not deck_override:
         raise RuntimeError("Deck override exhausted during rollout; belief deck should cover all draws.")
     after = [[(c.color(), c.rank()) for c in hand] for hand in state.player_hands()]
@@ -136,7 +138,6 @@ def _overwrite_last_deal(state: pyhanabi.HanabiState, before, deck_override: lis
     except IndexError:
         return
     state.player_hands()[pid][idx] = card
-
 
 @dataclass
 class HanabiObservation:
@@ -233,6 +234,106 @@ class HanabiLookback1:
 
         self.last_move = move
         
+def unmask_card(move):
+    """
+    move has a representation of the form <(Deal XY)> where X is color and Y is suit.
+    Recover the color and suit, and map them back to the numerical values they are assigned in pyhanabi.
+    """
+    if isinstance(move, pyhanabi.HanabiMove):
+        move = str(move)
+    s = str(move).strip()
+    # Expect formats like "<(Deal W4)>" or "(Deal W4)"
+    if s.startswith("<") and s.endswith(">"):
+        s = s[1:-1]
+    s = s.strip()
+    if s.startswith("(") and s.endswith(")"):
+        s = s[1:-1]
+
+    parts = s.split()
+    if len(parts) != 2 or parts[0].lower() != "deal":
+        raise ValueError(f"Unsupported move format for unmask_card: {move}")
+
+    card = parts[1]
+    if len(card) != 2:
+        raise ValueError(f"Unsupported card token in move: {move}")
+
+    color_char = card[0]
+    rank_char = card[1]
+
+    color = pyhanabi.color_char_to_idx(color_char)
+    rank = int(rank_char) - 1
+    return color, rank
+
+DEAL_TYPE_MOVES = [[[None for rank in range(HANABI_GAME_CONFIG["ranks"])] for color in range(HANABI_GAME_CONFIG["colors"])] for player in range(HANABI_GAME_CONFIG["players"])]
+needed = HANABI_GAME_CONFIG["ranks"] * HANABI_GAME_CONFIG["colors"] * HANABI_GAME_CONFIG["players"]
+game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
+while needed > 0:
+    fabricated_state = game.new_initial_state()
+    for _ in range(HANABI_GAME_CONFIG["players"] * HANABI_GAME_CONFIG["hand_size"]):
+        fabricated_state.deal_random_card()
+    moves = fabricated_state.move_history()
+    idx = 0
+    for player in range(HANABI_GAME_CONFIG["players"]):
+        for pos in range(HANABI_GAME_CONFIG["hand_size"]):
+            move = moves[idx]
+            idx += 1
+            color, rank = unmask_card(move)
+            if not DEAL_TYPE_MOVES[player][color][rank]:
+                DEAL_TYPE_MOVES[player][color][rank] = move.move()
+                needed -= 1
+
+
+def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[pyhanabi.HanabiCard]]):
+    """
+    Return a fabricated game state that plays as if it proceed according to state, but instead had fabricated_hand drawn.
+    """
+    
+    # Step 1: determine dealing order
+
+    deck_idx = 0
+    num_players, hand_size = HANABI_GAME_CONFIG["players"], HANABI_GAME_CONFIG["hand_size"]
+    initial_deal_length = num_players * hand_size
+
+    deal_to = []
+    rcv = [[] for _ in range(num_players)]
+    last_acting_player = -1
+
+    deck = []
+
+    for move in state.move_history():
+        if move.player() == -1:
+            if deck_idx < initial_deal_length:
+                deal_to.append(deck_idx // hand_size)
+            elif last_acting_player != -1:
+                deal_to.append(last_acting_player)
+
+            rcv[deal_to[-1]].append(deck_idx)
+            deck.append(unmask_card(move))
+            deck_idx += 1
+
+        elif move.move().type() in [pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD]:
+            last_acting_player = move.player()
+
+    # Step 2: fabricate!
+    for pos, card in zip(rcv[player_id][-hand_size:], fabricated_hand):
+        deck[pos] = card
+
+    game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
+    fabricated_state = game.new_initial_state()
+
+    deck_ptr = 0
+
+    print(deck, deal_to)
+
+    for move in state.move_history():
+        if move.player() == -1:
+            fabricated_state.apply_move(DEAL_TYPE_MOVES[deal_to[deck_ptr]][deck[deck_ptr][0]][deck[deck_ptr][1]])
+            deck_ptr += 1
+        else:
+            fabricated_state.apply_move(move.move())
+            
+
+    return fabricated_state
 
 
 __all__ = [
@@ -242,4 +343,6 @@ __all__ = [
     "_advance_chance_events",
     "_move_to_action_dict",
     "_action_dict_to_move",
+    "unmask_card",
+    "fabricate"
 ]
