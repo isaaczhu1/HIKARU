@@ -13,12 +13,100 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from hanabi_gru_baseline.config import CFG as GRU_CFG
 from hanabi_gru_baseline.model import HanabiGRUPolicy
 from hanabi_gru_baseline.utils import load_ckpt
 
 from sparta_wrapper.hanabi_utils import fabricate, build_observation
-from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
+from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG, DEVICE
+
+
+# -----------------------------------------------------------------------------
+# Shared model cache: load each checkpoint/device pair once per process.
+# -----------------------------------------------------------------------------
+class _SharedModel:
+    def __init__(self, net, obs_dim, num_moves, hidden, hand_size, colors, ranks, hint_target_offset):
+        self.net = net
+        self.obs_dim = obs_dim
+        self.num_moves = num_moves
+        self.hidden = hidden
+        self.hand_size = hand_size
+        self.colors = colors
+        self.ranks = ranks
+        self.hint_target_offset = hint_target_offset
+
+
+_MODEL_CACHE: dict[tuple[str, str], _SharedModel] = {}
+
+
+def _resolve_device(device: str | torch.device | None) -> torch.device:
+    """Choose configured device, with safe CPU fallback if CUDA is unavailable."""
+    target = torch.device(device or DEVICE)
+    if target.type == "cuda" and not torch.cuda.is_available():
+        return torch.device("cpu")
+    return target
+
+
+def _get_shared_model(model_config, model_ckpt_path, device: torch.device) -> _SharedModel:
+    device = _resolve_device(device)
+    key = (str(Path(model_ckpt_path).resolve()), str(device))
+    cached = _MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    state = load_ckpt(model_ckpt_path)
+    model_state = state["model"] if isinstance(state, dict) and "model" in state else state
+
+    # Infer architecture from the checkpoint to avoid mismatch issues.
+    obs_w = model_state["obs_fe.0.weight"]
+    pi_w = model_state["pi.weight"]
+    hidden = obs_w.shape[0]
+    obs_dim = obs_w.shape[1]
+    num_moves = pi_w.shape[0]
+    action_emb_dim = model_state["prev_other_emb.weight"].shape[1]
+    seat_emb_dim = model_state["seat_emb.weight"].shape[1]
+    include_prev_self = "prev_self_emb.weight" in model_state
+
+    # Allow config overrides for hidden sizes if provided; otherwise stick to checkpoint-derived.
+    cfg_model = getattr(model_config, "model", None)
+    if cfg_model is not None:
+        hidden = getattr(cfg_model, "hidden", hidden)
+        action_emb_dim = getattr(cfg_model, "action_emb", action_emb_dim)
+        seat_emb_dim = getattr(cfg_model, "seat_emb", seat_emb_dim)
+        include_prev_self = getattr(cfg_model, "include_prev_self", include_prev_self)
+
+    net = HanabiGRUPolicy(
+        obs_dim=obs_dim,
+        num_moves=num_moves,
+        hidden=hidden,
+        action_emb_dim=action_emb_dim,
+        seat_emb_dim=seat_emb_dim,
+        include_prev_self=include_prev_self,
+    ).to(device)
+    net.load_state_dict(model_state)
+    net.eval()
+
+    # Cache game-size metadata from config (used for action id mapping).
+    hanabi_cfg = getattr(model_config, "hanabi", None)
+    hand_size = getattr(hanabi_cfg, "hand_size", 5)
+    colors = getattr(hanabi_cfg, "colors", 5)
+    ranks = getattr(hanabi_cfg, "ranks", 5)
+    players = getattr(hanabi_cfg, "players", 2)
+    hint_target_offset = 1 if players > 1 else 0
+
+    shared = _SharedModel(
+        net=net,
+        obs_dim=obs_dim,
+        num_moves=num_moves,
+        hidden=hidden,
+        hand_size=hand_size,
+        colors=colors,
+        ranks=ranks,
+        hint_target_offset=hint_target_offset,
+    )
+    _MODEL_CACHE[key] = shared
+
+    print("Loaded shared model for GRU Blueprints")
+    return shared
 
 
 class _GameShim:
@@ -35,67 +123,39 @@ class NaiveGRUBlueprint:
     """
     A naive implementation of a GRU-based blueprint.
     Rolls out full history each time.
+    Shares weights globally; each instance only tracks its own hidden state.
     """
 
     def __init__(self, model_config, model_ckpt_path, device: str | torch.device | None = None):
         self.config = model_config
-        self.device = torch.device(device or "cpu")
+        self.device = _resolve_device(device)
 
-        state = load_ckpt(model_ckpt_path)
-        model_state = state["model"] if isinstance(state, dict) and "model" in state else state
+        shared = _get_shared_model(model_config, model_ckpt_path, self.device)
+        self._net = shared.net
+        self.obs_dim = shared.obs_dim
+        self.num_moves = shared.num_moves
+        self.hidden = shared.hidden
 
-        # Infer architecture from the checkpoint to avoid mismatch issues.
-        obs_w = model_state["obs_fe.0.weight"]
-        pi_w = model_state["pi.weight"]
-        hidden = obs_w.shape[0]
-        obs_dim = obs_w.shape[1]
-        num_moves = pi_w.shape[0]
-        action_emb_dim = model_state["prev_other_emb.weight"].shape[1]
-        seat_emb_dim = model_state["seat_emb.weight"].shape[1]
-        include_prev_self = "prev_self_emb.weight" in model_state
-
-        # Allow config overrides for hidden sizes if provided; otherwise stick to checkpoint-derived.
-        cfg_model = getattr(model_config, "model", None)
-        if cfg_model is not None:
-            hidden = getattr(cfg_model, "hidden", hidden)
-            action_emb_dim = getattr(cfg_model, "action_emb", action_emb_dim)
-            seat_emb_dim = getattr(cfg_model, "seat_emb", seat_emb_dim)
-            include_prev_self = getattr(cfg_model, "include_prev_self", include_prev_self)
-
-        self.net = HanabiGRUPolicy(
-            obs_dim=obs_dim,
-            num_moves=num_moves,
-            hidden=hidden,
-            action_emb_dim=action_emb_dim,
-            seat_emb_dim=seat_emb_dim,
-            include_prev_self=include_prev_self,
-        ).to(self.device)
-        self.net.load_state_dict(model_state)
-        self.net.eval()
-
-        self.obs_dim = obs_dim
-        self.num_moves = num_moves
-        self.hidden = hidden
-
-        # Cache game-size metadata from config (used for action id mapping).
-        hanabi_cfg = getattr(self.config, "hanabi", None)
-        self._hand_size = getattr(hanabi_cfg, "hand_size", 5)
-        self._colors = getattr(hanabi_cfg, "colors", 5)
-        self._ranks = getattr(hanabi_cfg, "ranks", 5)
-        self._sentinel_none = self.num_moves
-
-        players = getattr(hanabi_cfg, "players", 2)
-        self._hint_target_offset = 1 if players > 1 else 0
+        self._hand_size = shared.hand_size
+        self._colors = shared.colors
+        self._ranks = shared.ranks
+        self._sentinel_none = shared.num_moves
+        self._hint_target_offset = shared.hint_target_offset
 
         # Recurrent state and optional prev-self tracking
-        self._h = self.net.initial_state(batch=1, device=self.device)
+        self._h = self._net.initial_state(batch=1, device=self.device)
         self._prev_self_id = self._sentinel_none
         self._encoder_cache = {}  # map raw _game pointer -> ObservationEncoder
 
     def reset(self):
         """Reset recurrent state for a fresh episode."""
-        self._h = self.net.initial_state(batch=1, device=self.device)
+        self._h = self._net.initial_state(batch=1, device=self.device)
         self._prev_self_id = self._sentinel_none
+
+    @property
+    def net(self):
+        """Shared GRU network (weights are cached globally)."""
+        return self._net
 
     # ------------------------------------------------------------------
     # Public API
@@ -122,11 +182,11 @@ class NaiveGRUBlueprint:
 
         # Optional previous self action embedding
         prev_self = None
-        if getattr(self.net, "include_prev_self", False):
+        if getattr(self._net, "include_prev_self", False):
             prev_self_id = self._prev_self_id if prev_self_action is None else int(prev_self_action)
             prev_self = torch.tensor([[prev_self_id]], device=self.device, dtype=torch.long)
 
-        logits, _, h_new = self.net(
+        logits, _, h_new = self._net(
             obs_vec=obs_vec,
             seat=seat,
             prev_other=prev_other,
@@ -145,7 +205,7 @@ class NaiveGRUBlueprint:
         action_id = int(dist.sample().item())
 
         # Track prev self for next step if applicable
-        if getattr(self.net, "include_prev_self", False):
+        if getattr(self._net, "include_prev_self", False):
             self._prev_self_id = action_id
 
         # Map chosen id back to actual pyhanabi move
@@ -262,9 +322,8 @@ class MatureGRUBlueprint:
     def act(self, obs: pyhanabi.HanabiObservation):
         return self.naive_blueprint.act(obs, update_state=False)
 
-
-def CkptGuardFactoryFactory(ckpt_path):
-    naive_blueprint = NaiveGRUBlueprint(GRU_CFG, ckpt_path)
+def SamplerGRUFactoryFactory(model_config, ckpt_path):
+    naive_blueprint = NaiveGRUBlueprint(model_config, ckpt_path)
     def PrimedBlueprintFactory(state: pyhanabi.HanabiState, partner_id: int, my_id: int, hand_guess):
         primed_blueprint = MatureGRUBlueprint(naive_blueprint)
         primed_blueprint.prime(state, partner_id, my_id, hand_guess)
