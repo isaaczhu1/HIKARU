@@ -63,6 +63,7 @@ def _run_episode(env: rl_env.HanabiEnv, actors: List[Callable], render: bool = F
     turn = 0
     while not state.is_terminal():
         pid = state.cur_player()
+        prev_score = state.score()  # keep score before potentially losing a life
         player_obs = build_observation(state, pid)
         action_move = actors[pid](player_obs)
         action_dict = _move_to_action_dict(action_move)
@@ -72,14 +73,19 @@ def _run_episode(env: rl_env.HanabiEnv, actors: List[Callable], render: bool = F
         if render:
             _render_step(turn, pid, action_dict, state)
         if done:
+            # If we lost on lives, preserve the score *before* the fatal mistake.
+            if state.life_tokens() == 0:
+                return float(info.get("score", prev_score))
             return float(info.get("score", state.score()))
+    # Terminal without early done
     return float(state.score())
 
 
 def evaluate(episodes: int, blueprint_factory: Callable[[], object], writer: SummaryWriter | None = None, prefix: str = "gru_blueprint", render: bool = False) -> float:
     env = rl_env.HanabiEnv({"players": 2})
     scores = []
-    for ep in range(episodes):
+    from tqdm import tqdm
+    for ep in tqdm(range(episodes)):
         bps = [blueprint_factory(), blueprint_factory()]
         actors = [lambda obs, bp=bps[0]: bp.act(obs), lambda obs, bp=bps[1]: bp.act(obs)]
         score = _run_episode(env, actors, render=render)
