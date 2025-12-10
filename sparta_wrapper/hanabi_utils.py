@@ -318,23 +318,17 @@ def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[py
     for pos, card in zip(rcv[player_id][-hand_size:], fabricated_hand):
         deck[pos] = card
 
-    game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
-    fabricated_state = game.new_initial_state()
-
+    fabricated_move_history = []
     deck_ptr = 0
-
-    print(deck, deal_to)
 
     for move in state.move_history():
         if move.player() == -1:
-            fabricated_state.apply_move(DEAL_TYPE_MOVES[deal_to[deck_ptr]][deck[deck_ptr][0]][deck[deck_ptr][1]])
+            fabricated_move_history.append(DEAL_TYPE_MOVES[deal_to[deck_ptr]][deck[deck_ptr][0]][deck[deck_ptr][1]])
             deck_ptr += 1
         else:
-            fabricated_state.apply_move(move.move())
+            fabricated_move_history.append(move.move())
             
-
-    return fabricated_state
-
+    return fabricated_move_history
 
 __all__ = [
     "HanabiObservation",

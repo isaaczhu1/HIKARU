@@ -153,7 +153,7 @@ def _predict_partner(blueprint_factory, state, my_id, partner_id, my_hand_guess)
     # (Optional) If your hypothesis changes hint legality, rebuild legal moves accordingly;
     # for most play/discard choices the existing legal_moves are fine.
 
-    return blueprint_factory().act(obs)
+    return blueprint_factory(state, partner_id, my_id, my_hand_guess).act(obs)
 
 
 def sample_world_state(
