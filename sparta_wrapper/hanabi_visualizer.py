@@ -30,7 +30,7 @@ from sparta_wrapper.hanabi_utils import (
     build_observation,
     HanabiObservation,
 )
-from sparta_wrapper.naive_gru_blueprint import GRU_CFG, HanabiGRUBlueprint
+from sparta_wrapper.gru_blueprint import GRU_CFG, NaiveGRUBlueprint
 
 DEFAULT_RANK_MULT = [3, 2, 2, 2, 1]
 
@@ -125,7 +125,7 @@ def _obs_to_dict(obs: HanabiObservation) -> Dict:
     }
 
 
-def _play_one_game(blueprint_factory: Callable[[], HanabiGRUBlueprint]) -> Dict:
+def _play_one_game(blueprint_factory: Callable[[], NaiveGRUBlueprint]) -> Dict:
     env = rl_env.HanabiEnv({"players": 2})
     env.reset()
     state = env.state
@@ -242,6 +242,7 @@ HTML_PAGE = """<!doctype html>
     .fireworks-strip { display:flex; gap:10px; align-items:center; justify-content:flex-start; }
     .firework-pill { min-width:70px; text-align:center; font-size:24px; padding:10px 14px; border-radius:10px; border:2px solid #30363d; background:#161b22; }
     .highlight { box-shadow: 0 0 10px 2px #ffd700; border-color:#ffd700 !important; }
+    .critical { box-shadow: 0 0 14px 3px #ff4d4f; border-color:#ff4d4f !important; }
   </style>
 </head>
 <body>
@@ -266,22 +267,24 @@ HTML_PAGE = """<!doctype html>
     const stepSlider = document.getElementById('stepSlider');
     const stepLabel = document.getElementById('stepLabel');
     const omniscientToggle = document.getElementById('omniscientToggle');
+    const RANK_MULT = [3,2,2,2,1]; // standard Hanabi
 
     function render() {
       if (!data) return;
       const traj = data.trajectory;
       const entry = traj[step];
       stepLabel.textContent = `Step ${step} / ${traj.length - 1} (actor P${entry.actor}${entry.action ? '' : ' [initial]'})`;
+      const criticalSet = computeCriticalTypes(entry.state);
 
       // Summary
       const s = entry.state;
       const effects = entry.effects || {};
-      document.getElementById('fireworksStrip').innerHTML = renderFireworksStrip(s.fireworks, effects.fireworks || []);
+      document.getElementById('fireworksStrip').innerHTML = renderFireworksStrip(s.fireworks, effects.fireworks || [], criticalSet);
       document.getElementById('summary').innerHTML = `
         <div><span class="label">Score:</span> ${s.score} | <span class="label">Deck:</span> ${s.deck_size} | <span class="label">Info:</span> ${s.information_tokens} | <span class="label">Lives:</span> ${s.life_tokens}</div>
         <div><span class="label">Fireworks:</span> ${Object.entries(s.fireworks).map(([c,v]) => c+':'+v).join(' ')}</div>
-        <div><span class="label">Discard:</span> ${renderDiscard(s.discard_pile, effects.discard || [])}</div>
-        <div><span class="label">Action:</span> ${renderAction(entry.action, entry.actor, effects)}</div>
+        <div><span class="label">Discard:</span> ${renderDiscard(s.discard_pile, effects.discard || [], criticalSet)}</div>
+        <div><span class="label">Action:</span> ${renderAction(entry.action, entry.actor, effects, criticalSet, s)}</div>
       `;
 
       // Per-player perspectives side-by-side
@@ -289,7 +292,7 @@ HTML_PAGE = """<!doctype html>
       const handsDiv = document.getElementById('hands');
       let html = '<div class="label">Per-player perspectives</div><div class="row">';
       views.forEach((v, idx) => {
-        html += renderPerspective(v, idx, s, omniscientToggle.checked, effects);
+        html += renderPerspective(v, idx, s, omniscientToggle.checked, effects, criticalSet);
       });
       html += '</div>';
       handsDiv.innerHTML = html;
@@ -298,7 +301,7 @@ HTML_PAGE = """<!doctype html>
       let boardHtml = `
         <div><span class="label">Deck:</span> ${s.deck_size} | <span class="label">Info:</span> ${s.information_tokens} | <span class="label">Lives:</span> ${s.life_tokens}</div>
         <div><span class="label">Fireworks:</span> ${Object.entries(s.fireworks).map(([c,v]) => `<span class="pill c-${c}">${c}:${v}</span>`).join(' ')}</div>
-        <div><span class="label">Discard:</span> ${renderDiscard(s.discard_pile)}</div>
+        <div><span class="label">Discard:</span> ${renderDiscard(s.discard_pile, [], criticalSet)}</div>
       `;
       boardHtml += '<div class="row">';
       views.forEach((v, idx) => {
@@ -314,7 +317,7 @@ HTML_PAGE = """<!doctype html>
       document.getElementById('lastMoves').innerHTML = '<div class="label">Last moves (most recent first):</div>' + lm.map(m => `<div>P${m.player}: ${JSON.stringify(m.move)}</div>`).join('');
     }
 
-    function renderCard(c, highlighted=false, obfuscate=false) {
+    function renderCard(c, highlighted=false, obfuscate=false, critical=false) {
       let color = c.color;
       let rank = c.rank;
       if (obfuscate) {
@@ -325,9 +328,11 @@ HTML_PAGE = """<!doctype html>
         color = color || '?';
         rank = rank !== null && rank !== undefined ? rank + 1 : '?';
       }
-      const cls = color ? 'c-' + color : '';
-      const hl = highlighted ? ' highlight' : '';
-      return `<span class="card ${cls}${hl}">${color}${rank}</span>`;
+      const classes = ['card'];
+      if (color && color !== '?') classes.push('c-' + color);
+      if (highlighted) classes.push('highlight');
+      if (critical) classes.push('critical');
+      return `<span class="${classes.join(' ')}">${color}${rank}</span>`;
     }
 
     function renderMask(mask, colorLabels, rankLabels) {
@@ -352,7 +357,7 @@ HTML_PAGE = """<!doctype html>
       return html;
     }
 
-    function renderDiscard(discard, highlights) {
+    function renderDiscard(discard, highlights, criticalSet) {
       if (!discard || !discard.length) return '-';
       const order = ['R','Y','G','B','W'];
       const buckets = {};
@@ -378,8 +383,9 @@ HTML_PAGE = """<!doctype html>
         Object.entries(counts).forEach(([rank, count]) => {
           const key = `${col}:${parseInt(rank,10)}`;
           const hlCount = Math.min(count, highlightMap[key] || 0);
-          const cls = hlCount > 0 ? 'card c-' + col + ' highlight' : 'card c-' + col;
-          html += `<span class="${cls}" title="${col}${parseInt(rank,10)+1} x${count}">${col}${parseInt(rank,10)+1}`;
+          const classes = ['card', `c-${col}`];
+          if (hlCount > 0) classes.push('highlight');
+          html += `<span class="${classes.join(' ')}" title="${col}${parseInt(rank,10)+1} x${count}">${col}${parseInt(rank,10)+1}`;
           if (count > 1) html += `×${count}`;
           html += `</span>`;
           if (hlCount > 0) highlightMap[key] -= hlCount;
@@ -390,7 +396,7 @@ HTML_PAGE = """<!doctype html>
       return html || '-';
     }
 
-    function renderPerspective(view, seatIdx, state, showOmniscient, effects) {
+    function renderPerspective(view, seatIdx, state, showOmniscient, effects, criticalSet) {
       let html = `<div class="section" style="min-width:280px;"><div class="label">P${seatIdx} perspective (current player: P${view.current_player})</div>`;
       html += '<div class="label">Observed hands</div><div class="row">';
       // Use omniscient hand info for highlighting; hide own values in renderCard via obfuscate flag.
@@ -398,7 +404,7 @@ HTML_PAGE = """<!doctype html>
       handsForView.forEach((hand, idx) => {
         const hintMarks = computeHintMarks(hand, idx, effects);
         html += `<div class="section"><div class="label">P${idx}${effects && effects.hint_target === idx ? ' (hinted)' : ''}</div>`;
-        html += hand.map((c, i) => renderCard(c, hintMarks[i], idx === view.player_id)).join('');
+        html += hand.map((c, i) => renderCard(c, hintMarks[i], idx === view.player_id, isCritical(c, criticalSet))).join('');
         html += '</div>';
       });
       html += '</div>';
@@ -407,7 +413,7 @@ HTML_PAGE = """<!doctype html>
         const colors = Object.keys(view.fireworks);
         const ranks = k.mask && k.mask[0] ? k.mask[0].map((_, i) => i + 1) : [];
         html += `<div class="section"><div class="label">Card ${idx}</div>`;
-        html += renderCard({color:k.color, rank:k.rank});
+        html += renderCard({color:k.color, rank:k.rank}, false, false, isCritical({color:k.color, rank:k.rank}, criticalSet));
         const mask = k.mask_pruned || k.mask;
         html += renderMask(mask, colors, ranks);
         html += '</div>';
@@ -418,7 +424,7 @@ HTML_PAGE = """<!doctype html>
         state.hands_full.forEach((hand, idx) => {
           const hintMarks = computeHintMarks(hand, idx, effects);
           html += `<div class="section"><div class="label">P${idx}</div>`;
-          html += hand.map((c, i) => renderCard(c, hintMarks[i])).join('');
+          html += hand.map((c, i) => renderCard(c, hintMarks[i], false, isCritical(c, criticalSet))).join('');
           html += '</div>';
         });
         html += '</div>';
@@ -427,23 +433,34 @@ HTML_PAGE = """<!doctype html>
       return html;
     }
 
-    function renderFireworksStrip(fireworks, highlights) {
+    function renderFireworksStrip(fireworks, highlights, criticalSet) {
       const order = ['R','Y','G','B','W'];
       let html = '<div class="fireworks-strip">';
       order.forEach(c => {
         if (fireworks[c] === undefined) return;
-        const cls = (highlights || []).includes(c) ? `firework-pill c-${c} highlight` : `firework-pill c-${c}`;
-        html += `<div class="${cls}">${c}:${fireworks[c]}</div>`;
+        const key = `${c}:${(fireworks[c] || 0) - 1}`;
+        const isCrit = criticalSet && criticalSet.has(key);
+        const classes = ['firework-pill', `c-${c}`];
+        if ((highlights || []).includes(c)) classes.push('highlight');
+        if (isCrit) classes.push('critical');
+        html += `<div class="${classes.join(' ')}">${c}:${fireworks[c]}</div>`;
       });
       html += '</div>';
       return html;
     }
 
-    function renderAction(action, actor, effects) {
+    function renderAction(action, actor, effects, criticalSet, state) {
       if (!action) return 'Initial state';
       const at = action.action_type;
       if (at === 'PLAY' || at === 'DISCARD') {
-        const cardHtml = effects && effects.played_card ? renderCard(effects.played_card, true, false) : `idx=${action.card_index}`;
+        const cardHtml = effects && effects.played_card ? renderCard(
+          effects.played_card,
+          true,
+          false,
+          at === 'DISCARD'
+            ? isActionCardCritical(effects.played_card, state || {discard_pile:[], fireworks:{}, hands_full:[]})
+            : isCritical(effects.played_card, criticalSet)
+        ) : `idx=${action.card_index}`;
         return `P${actor} ${at.toLowerCase()}s ${cardHtml}`;
       }
       if (at === 'REVEAL_COLOR') {
@@ -475,6 +492,101 @@ HTML_PAGE = """<!doctype html>
       step = Math.max(0, Math.min(v, data.trajectory.length - 1));
       stepSlider.value = step;
       render();
+    }
+
+    function keyFor(card) {
+      if (!card || card.color === undefined || card.rank === undefined || card.color === null || card.rank === null) return null;
+      return `${card.color}:${card.rank}`;
+    }
+
+    function isCritical(card, criticalSet) {
+      const k = keyFor(card);
+      return !!(k && criticalSet && criticalSet.has(k));
+    }
+
+    function computeCountStats(state, excludeCards=[]) {
+      const colors = ['R','Y','G','B','W'];
+      const initMatrix = (fillFn) => {
+        const obj = {};
+        colors.forEach(c => { obj[c] = RANK_MULT.map((_, i) => fillFn(c, i)); });
+        return obj;
+      };
+
+      const totals = initMatrix((c, i) => RANK_MULT[i]);
+      const discardCounts = initMatrix(() => 0);
+      const handCounts = initMatrix(() => 0);
+      const excludedCounts = initMatrix(() => 0);
+
+      const excludeSet = new Map();
+      excludeCards.forEach(card => {
+        const k = keyFor(card);
+        if (!k) return;
+        excludeSet.set(k, (excludeSet.get(k) || 0) + 1);
+      });
+
+      function bump(matrix, card) {
+        const k = keyFor(card);
+        if (!k) return;
+        const [col, rStr] = k.split(':');
+        const r = parseInt(rStr, 10);
+        if (!Number.isFinite(r)) return;
+        if (!matrix[col] || matrix[col][r] === undefined) return;
+        const remainingExcl = excludeSet.get(k) || 0;
+        if (remainingExcl > 0) {
+          excludeSet.set(k, remainingExcl - 1);
+          excludedCounts[col][r] += 1;
+          return;
+        }
+        matrix[col][r] += 1;
+      }
+
+      (state.discard_pile || []).forEach(c => bump(discardCounts, c));
+      (state.hands_full || []).forEach(hand => hand.forEach(c => bump(handCounts, c)));
+
+      const deckRemaining = initMatrix(() => 0);
+      Object.entries(deckRemaining).forEach(([col, arr]) => {
+        arr.forEach((_, r) => {
+          // Do not count fireworks progress toward exhaustion; once a rank is on the stack it is "safe".
+          const remaining = totals[col][r] - discardCounts[col][r] - handCounts[col][r];
+          arr[r] = Math.max(0, remaining);
+        });
+      });
+
+      return { deckRemaining, handCounts, excludedCounts };
+    }
+
+    function computeCriticalTypes(state) {
+      const { deckRemaining, handCounts } = computeCountStats(state);
+      const critical = new Set();
+      (state.hands_full || []).forEach(hand => hand.forEach(card => {
+        const k = keyFor(card);
+        if (!k) return;
+        const [col, rStr] = k.split(':');
+        const r = parseInt(rStr, 10);
+        if (!Number.isFinite(r)) return;
+        // Critical when no copies are left in the deck and this is the only copy in all hands.
+        const remainingInDeck = deckRemaining[col] && deckRemaining[col][r];
+        const copiesInHands = handCounts[col] && handCounts[col][r];
+        if (remainingInDeck === 0 && copiesInHands === 1) {
+          critical.add(k);
+        }
+      }));
+      return critical;
+    }
+
+    function isActionCardCritical(card, state) {
+      const k = keyFor(card);
+      if (!k) return false;
+      const [col, rStr] = k.split(':');
+      const r = parseInt(rStr, 10);
+      if (!Number.isFinite(r)) return false;
+      const { deckRemaining, handCounts, excludedCounts } = computeCountStats(state, [card]);
+      const remainingInDeck = deckRemaining[col] && deckRemaining[col][r] || 0;
+      const excludedSame = excludedCounts[col] && excludedCounts[col][r] || 0;
+      const copiesInHands = handCounts[col] && handCounts[col][r] || 0;
+      // Ignore the action card itself when checking for remaining copies.
+      const remainingBeyondActionCard = Math.max(0, remainingInDeck - excludedSame);
+      return remainingBeyondActionCard === 0 && copiesInHands === 0;
     }
 
     document.getElementById('prevBtn').onclick = () => setStep(step - 1);
@@ -535,7 +647,7 @@ def main() -> None:
     if not ckpt_path.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
-    blueprint_factory = lambda: HanabiGRUBlueprint(GRU_CFG(), ckpt_path, device=args.device)
+    blueprint_factory = lambda: NaiveGRUBlueprint(GRU_CFG(), ckpt_path, device=args.device)
     payload = _play_one_game(blueprint_factory)
 
     server = _start_server("127.0.0.1", args.port, payload)

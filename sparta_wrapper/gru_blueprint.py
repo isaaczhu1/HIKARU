@@ -17,6 +17,9 @@ from hanabi_gru_baseline.config import CFG as GRU_CFG
 from hanabi_gru_baseline.model import HanabiGRUPolicy
 from hanabi_gru_baseline.utils import load_ckpt
 
+from sparta_wrapper.hanabi_utils import fabricate, build_observation
+from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
+
 
 class _GameShim:
     """Light shim to mirror rl_env's ObservationEncoder game handle contract."""
@@ -89,11 +92,16 @@ class NaiveGRUBlueprint:
         self._prev_self_id = self._sentinel_none
         self._encoder_cache = {}  # map raw _game pointer -> ObservationEncoder
 
+    def reset(self):
+        """Reset recurrent state for a fresh episode."""
+        self._h = self.net.initial_state(batch=1, device=self.device)
+        self._prev_self_id = self._sentinel_none
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     @torch.no_grad()
-    def act(self, observation, *, prev_self_action=None):
+    def act(self, observation, *, prev_self_action=None, update_state=True):
         """Select an action for the current player given HanabiObservation."""
         obs_vec = self._encode_vectorized_observation(observation)
 
@@ -232,4 +240,33 @@ class NaiveGRUBlueprint:
             return None
         raise ValueError(f"Unsupported move dict: {move_dict}")
 
-HanabiGRUBlueprint = NaiveGRUBlueprint
+class MatureGRUBlueprint:
+    """Placeholder wrapper for future extensions; not implemented."""
+
+    def __init__(self, naive_blueprint: NaiveGRUBlueprint):
+        self.naive_blueprint = naive_blueprint
+        
+    def prime(self, state: pyhanabi.HanabiState, partner_id: int, my_id: int, hand_guess):
+        """
+        Prime the hidden state for inference
+        """
+        self.naive_blueprint.reset()
+
+        game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
+        fabricated_state = game.new_initial_state()
+        for move in fabricate(state, my_id, hand_guess):
+            fabricated_state.apply_move(move)
+            if fabricated_state.cur_player() == partner_id:
+                self.naive_blueprint.act(build_observation(fabricated_state, partner_id))
+
+    def act(self, obs: pyhanabi.HanabiObservation):
+        return self.naive_blueprint.act(obs, update_state=False)
+
+
+def CkptGuardFactoryFactory(ckpt_path):
+    naive_blueprint = NaiveGRUBlueprint(GRU_CFG, ckpt_path)
+    def PrimedBlueprintFactory(state: pyhanabi.HanabiState, partner_id: int, my_id: int, hand_guess):
+        primed_blueprint = MatureGRUBlueprint(naive_blueprint)
+        primed_blueprint.prime(state, partner_id, my_id, hand_guess)
+        return primed_blueprint
+    return PrimedBlueprintFactory

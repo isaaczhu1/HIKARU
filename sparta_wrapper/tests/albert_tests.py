@@ -14,7 +14,8 @@ from sparta_wrapper.belief_models import sample_world_state, _iter_all_hands, _c
 from sparta_wrapper.hanabi_utils import build_observation, HanabiLookback1, unmask_card, fabricate
 from sparta_wrapper.hanabi_utils import HanabiObservation, _advance_chance_events, build_observation
 
-from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
+from sparta_wrapper.gru_blueprint import CkptGuardFactoryFactory
+from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG, CKPT_PATH
 
 class SignalBlueprint:
     """Signal by looking at the next player's first card."""
@@ -136,7 +137,7 @@ def squid_game(seed):
         lagging_state=lookback1.prev_state,
         obs=obs1,
         rng=rng,
-        blueprint_factory=signal_blueprint_factory,
+        blueprint_factory=CkptGuardFactoryFactory(CKPT_PATH),
         takes=50,
         upstream_factor=5,
         max_attempts=3,
@@ -157,9 +158,9 @@ def squid_game(seed):
         else:
             print(move.move().type())
 
-    state = fabricate(lookback1.cur_state, 1, [(0, 2), (0, 2), (0, 0)])
+    fabricated_move_history = fabricate(lookback1.cur_state, 1, [(0, 2), (0, 2), (0, 0)])
 
-    for move in state.move_history():
+    for move in fabricated_move_history:
         print(move, move.player(), move.color(), move.rank())
 
 def octopus_activities(seed):
