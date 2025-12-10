@@ -17,6 +17,17 @@ from hanabi_gru_baseline.config import CFG as GRU_CFG
 from hanabi_gru_baseline.model import HanabiGRUPolicy
 from hanabi_gru_baseline.utils import load_ckpt
 
+
+class _GameShim:
+    """Light shim to mirror rl_env's ObservationEncoder game handle contract."""
+
+    def __init__(self, c_game):
+        self._game = c_game
+
+    @property
+    def c_game(self):
+        return self._game
+
 class NaiveGRUBlueprint:
     """
     A naive implementation of a GRU-based blueprint.
@@ -76,6 +87,7 @@ class NaiveGRUBlueprint:
         # Recurrent state and optional prev-self tracking
         self._h = self.net.initial_state(batch=1, device=self.device)
         self._prev_self_id = self._sentinel_none
+        self._encoder_cache = {}  # map raw _game pointer -> ObservationEncoder
 
     # ------------------------------------------------------------------
     # Public API
@@ -83,36 +95,7 @@ class NaiveGRUBlueprint:
     @torch.no_grad()
     def act(self, observation, *, prev_self_action=None):
         """Select an action for the current player given HanabiObservation."""
-        # Build an encoder tied to the same game as the observation to avoid pointer mismatches.
-        class _GameShim:
-            def __init__(self, c_game):
-                self._game = c_game
-
-            @property
-            def c_game(self):
-                return self._game
-
-        encoder = pyhanabi.ObservationEncoder(
-            _GameShim(observation.raw_observation._game),
-            pyhanabi.ObservationEncoderType.CANONICAL,
-        )
-
-        # Vectorize observation
-        obs_vec = torch.tensor(
-            encoder.encode(observation.raw_observation),
-            dtype=torch.float32,
-            device=self.device,
-        ).unsqueeze(0).unsqueeze(0)  # [1,1,obs_dim?]
-        if obs_vec.shape[-1] != self.obs_dim:
-            # Pad or trim to match training dimension
-            target = self.obs_dim
-            cur = obs_vec.shape[-1]
-            if cur < target:
-                pad = torch.zeros(1, 1, target, device=self.device, dtype=torch.float32)
-                pad[..., :cur] = obs_vec
-                obs_vec = pad
-            else:
-                obs_vec = obs_vec[..., :target]
+        obs_vec = self._encode_vectorized_observation(observation)
 
         seat = torch.tensor([[observation.current_player]], device=self.device, dtype=torch.long)
 
@@ -142,6 +125,7 @@ class NaiveGRUBlueprint:
             h=self._h,
             prev_self=prev_self,
         )
+
         # Detach GRU state to prevent graph accumulation during rollout.
         self._h = h_new.detach()
         logits = logits.squeeze(0)  # [1, num_moves]
@@ -163,6 +147,33 @@ class NaiveGRUBlueprint:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _encode_vectorized_observation(self, observation):
+        """
+        Match the baseline HanabiEnv2P encoding by using pyhanabi.ObservationEncoder
+        (same as rl_env's 'vectorized' field), then pad/trim to the trained obs_dim.
+        """
+        # Cache encoder per underlying game to avoid reconstructing every call.
+        game_ptr = observation.raw_observation._game
+        encoder = self._encoder_cache.get(game_ptr)
+        if encoder is None:
+            encoder = pyhanabi.ObservationEncoder(
+                _GameShim(game_ptr), pyhanabi.ObservationEncoderType.CANONICAL
+            )
+            self._encoder_cache[game_ptr] = encoder
+
+        vec = encoder.encode(observation.raw_observation)
+        obs_vec = torch.tensor(vec, dtype=torch.float32, device=self.device).view(1, 1, -1)
+        target = self.obs_dim
+        cur = obs_vec.shape[-1]
+        if cur != target:
+            if cur < target:
+                pad = torch.zeros(1, 1, target, device=self.device, dtype=torch.float32)
+                pad[..., :cur] = obs_vec
+                obs_vec = pad
+            else:
+                obs_vec = obs_vec[..., :target]
+        return obs_vec
+
     def _id_from_move(self, move: pyhanabi.HanabiMove) -> int:
         t = move.type()
         if t == pyhanabi.HanabiMoveType.PLAY:
@@ -221,6 +232,4 @@ class NaiveGRUBlueprint:
             return None
         raise ValueError(f"Unsupported move dict: {move_dict}")
 
-
-# Alias for naming consistency
 HanabiGRUBlueprint = NaiveGRUBlueprint

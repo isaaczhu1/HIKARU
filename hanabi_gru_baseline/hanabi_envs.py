@@ -148,7 +148,7 @@ class HanabiEnv2P:
             return self._a_reveal_color0 + self._parse_color(a.get("color", 0))
         if t == "REVEAL_RANK":
             rank1 = int(a.get("rank", 1))
-            return self._a_reveal_rank0 + (rank1 - 1)
+            return self._a_reveal_rank0 + rank1
         raise ValueError(f"Unknown action dict: {a}")
 
     def _rl_action_from_id(self, gid):
@@ -164,7 +164,7 @@ class HanabiEnv2P:
             }
         return {
             "action_type": "REVEAL_RANK",
-            "rank": (gid - self._a_reveal_rank0) + 1,
+            "rank": (gid - self._a_reveal_rank0),
             "target_offset": self._hint_target_offset,
         }
 

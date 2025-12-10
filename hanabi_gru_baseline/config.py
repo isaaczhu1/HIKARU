@@ -25,7 +25,7 @@ class CFG:
         gamma = 0.99
         gae_lambda = 0.95
         max_grad_norm = 0.5
-        seq_len = 16 # can be overridden in the train.py args
+        seq_len = 1 # can be overridden in the train.py args
         value_clip = 0.2 
 
     # New: simple schedules (used by train.py)

@@ -150,6 +150,8 @@ def squid_game(seed):
     for f, k in frequencies.items():
         print(f, k)
 
+def octopus_activities(seed):
+    pass
 
 if __name__ == "__main__":
     squid_game(67)
