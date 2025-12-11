@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import sys
 from typing import Callable, Dict, List
 
-import torch
-from hanabi_learning_environment import pyhanabi, rl_env
+from hanabi_learning_environment import pyhanabi
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:  # pragma: no branch
@@ -24,13 +23,14 @@ if str(ROOT) not in sys.path:  # pragma: no branch
 
 from sparta_wrapper.hanabi_utils import (
     _card_to_dict,
-    _hand_to_dict,
     _fireworks_to_dict,
     build_observation,
     HanabiObservation,
+    HanabiLookback1,
     move_to_dict,
 )
 from sparta_wrapper.gru_blueprint import GRU_CFG, NaiveGRUBlueprint
+from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
 
 DEFAULT_RANK_MULT = [3, 2, 2, 2, 1]
 
@@ -125,32 +125,65 @@ def _obs_to_dict(obs: HanabiObservation) -> Dict:
     }
 
 
-def _play_one_game(blueprint_factory: Callable[[], NaiveGRUBlueprint]) -> Dict:
-    env = rl_env.HanabiEnv({"players": 2})
-    env.reset()
-    state = env.state
+def _compute_effects(
+    pid: int,
+    action_move: pyhanabi.HanabiMove,
+    fireworks_before: List[int],
+    fireworks_after: List[int],
+    discard_before: List[pyhanabi.HanabiCard],
+    discard_after: List[pyhanabi.HanabiCard],
+    played_card: pyhanabi.HanabiCard | None,
+    num_players: int,
+) -> Dict:
+    fire_highlight = [pyhanabi.COLOR_CHAR[i] for i, (b, a) in enumerate(zip(fireworks_before, fireworks_after)) if a > b]
+    discard_highlight = []
+    if len(discard_after) > len(discard_before):
+        new_cards = discard_after[len(discard_before):]
+        discard_highlight = [_card_to_dict(c) for c in new_cards]
+    elif played_card is not None and action_move.type() == pyhanabi.HanabiMoveType.DISCARD:
+        discard_highlight = [_card_to_dict(played_card)]
 
-    blueprints = [blueprint_factory(), blueprint_factory()]
+    effects = {
+        "fireworks": fire_highlight,
+        "discard": discard_highlight,
+        "action_type": action_move.type().name,
+        "actor": pid,
+    }
+    if action_move.type() in (pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD) and played_card is not None:
+        effects["played_card"] = _card_to_dict(played_card)
+    if action_move.type() in (pyhanabi.HanabiMoveType.REVEAL_COLOR, pyhanabi.HanabiMoveType.REVEAL_RANK):
+        effects["hint_target"] = (pid + action_move.target_offset()) % num_players
+        if action_move.type() == pyhanabi.HanabiMoveType.REVEAL_COLOR:
+            effects["hint_color"] = pyhanabi.COLOR_CHAR[action_move.color()]
+        if action_move.type() == pyhanabi.HanabiMoveType.REVEAL_RANK:
+            effects["hint_rank"] = action_move.rank()
+    return effects
 
-    trajectory: List[Dict] = []
-    # Initial snapshot before any move
-    trajectory.append(
+
+def _play_one_game(blueprint_factory: Callable[[], NaiveGRUBlueprint], seed: int = 0) -> Dict:
+    game = HanabiLookback1(HANABI_GAME_CONFIG, seed)
+    state = game.cur_state
+
+    num_players = state.num_players()
+    blueprints = [blueprint_factory() for _ in range(num_players)]
+
+    trajectory: List[Dict] = [
         {
             "turn": 0,
             "actor": state.cur_player(),
             "action": None,
             "state": _state_to_dict(state),
-            "views": [_obs_to_dict(build_observation(state, pid)) for pid in range(state.num_players())],
+            "views": [_obs_to_dict(build_observation(state, pid)) for pid in range(num_players)],
         }
-    )
+    ]
 
     turn = 0
     while not state.is_terminal():
         pid = state.cur_player()
+
         obs = build_observation(state, pid)
         action_move = blueprints[pid].act(obs)
         action_dict = move_to_dict(action_move)
-        # Track effects
         fireworks_before = list(state.fireworks())
         discard_before = list(state.discard_pile())
         played_card = None
@@ -159,35 +192,23 @@ def _play_one_game(blueprint_factory: Callable[[], NaiveGRUBlueprint]) -> Dict:
                 played_card = state.player_hands()[pid][action_move.card_index()]
             except Exception:
                 played_card = None
-        _, _, done, info = env.step(action_dict)
-        state = env.state
+
+        game.apply_move(action_move)
+        state = game.cur_state
         turn += 1
+
         fireworks_after = list(state.fireworks())
         discard_after = list(state.discard_pile())
-        fire_highlight = []
-        for i, (b, a) in enumerate(zip(fireworks_before, fireworks_after)):
-            if a > b:
-                fire_highlight.append(pyhanabi.COLOR_CHAR[i])
-        discard_highlight = []
-        if len(discard_after) > len(discard_before):
-            new_cards = discard_after[len(discard_before):]
-            discard_highlight = [_card_to_dict(c) for c in new_cards]
-        elif played_card is not None and action_move.type() == pyhanabi.HanabiMoveType.DISCARD:
-            discard_highlight = [_card_to_dict(played_card)]
-        effects = {
-            "fireworks": fire_highlight,
-            "discard": discard_highlight,
-            "action_type": action_dict.get("action_type"),
-            "actor": pid,
-        }
-        if action_move.type() in (pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD) and played_card is not None:
-            effects["played_card"] = _card_to_dict(played_card)
-        if action_move.type() in (pyhanabi.HanabiMoveType.REVEAL_COLOR, pyhanabi.HanabiMoveType.REVEAL_RANK):
-            effects["hint_target"] = (pid + action_move.target_offset()) % state.num_players()
-            if action_move.type() == pyhanabi.HanabiMoveType.REVEAL_COLOR:
-                effects["hint_color"] = pyhanabi.COLOR_CHAR[action_move.color()]
-            if action_move.type() == pyhanabi.HanabiMoveType.REVEAL_RANK:
-                effects["hint_rank"] = action_move.rank()
+        effects = _compute_effects(
+            pid,
+            action_move,
+            fireworks_before,
+            fireworks_after,
+            discard_before,
+            discard_after,
+            played_card,
+            num_players,
+        )
 
         trajectory.append(
             {
@@ -195,16 +216,14 @@ def _play_one_game(blueprint_factory: Callable[[], NaiveGRUBlueprint]) -> Dict:
                 "actor": pid,
                 "action": action_dict,
                 "state": _state_to_dict(state),
-                "views": [_obs_to_dict(build_observation(state, p)) for p in range(state.num_players())],
-                "score": float(info.get("score", state.score())),
+                "views": [_obs_to_dict(build_observation(state, p)) for p in range(num_players)],
+                "score": float(state.score()),
                 "effects": effects,
             }
         )
-        if done:
-            break
 
     return {
-        "players": state.num_players(),
+        "players": num_players,
         "trajectory": trajectory,
         "final_score": trajectory[-1].get("score", state.score()),
     }
@@ -250,6 +269,7 @@ HTML_PAGE = """<!doctype html>
   <div class="section">
     <button id="prevBtn">&larr; Prev</button>
     <button id="nextBtn">Next &rarr;</button>
+    <button id="autoplayBtn">Play</button>
     <input id="stepSlider" type="range" min="0" max="0" value="0" style="width:300px;">
     <span id="stepLabel">Step 0</span>
     <label style="margin-left:1rem;">
@@ -264,9 +284,11 @@ HTML_PAGE = """<!doctype html>
   <script>
     let data = null;
     let step = 0;
+    let autoplayTimer = null;
     const stepSlider = document.getElementById('stepSlider');
     const stepLabel = document.getElementById('stepLabel');
     const omniscientToggle = document.getElementById('omniscientToggle');
+    const autoplayBtn = document.getElementById('autoplayBtn');
     const RANK_MULT = [3,2,2,2,1]; // standard Hanabi
 
     function render() {
@@ -489,9 +511,13 @@ HTML_PAGE = """<!doctype html>
     }
 
     function setStep(v) {
+      if (!data) return;
       step = Math.max(0, Math.min(v, data.trajectory.length - 1));
       stepSlider.value = step;
       render();
+      if (step >= data.trajectory.length - 1) {
+        stopAutoplay();
+      }
     }
 
     function keyFor(card) {
@@ -589,8 +615,39 @@ HTML_PAGE = """<!doctype html>
       return remainingBeyondActionCard === 0 && copiesInHands === 0;
     }
 
+    function startAutoplay() {
+      if (autoplayTimer || !data) return;
+      autoplayBtn.textContent = 'Pause';
+      autoplayTimer = setInterval(() => {
+        if (!data) {
+          stopAutoplay();
+          return;
+        }
+        if (step >= data.trajectory.length - 1) {
+          stopAutoplay();
+          return;
+        }
+        setStep(step + 1);
+      }, 1000);
+    }
+
+    function stopAutoplay() {
+      if (autoplayTimer) {
+        clearInterval(autoplayTimer);
+        autoplayTimer = null;
+      }
+      autoplayBtn.textContent = 'Play';
+    }
+
     document.getElementById('prevBtn').onclick = () => setStep(step - 1);
     document.getElementById('nextBtn').onclick = () => setStep(step + 1);
+    autoplayBtn.onclick = () => {
+      if (autoplayTimer) {
+        stopAutoplay();
+      } else {
+        startAutoplay();
+      }
+    };
     stepSlider.oninput = e => setStep(parseInt(e.target.value, 10));
     omniscientToggle.onchange = render;
 
@@ -641,6 +698,7 @@ def main() -> None:
     ap.add_argument("--ckpt", type=str, default="gru_checkpoints/ckpt_020000.pt", help="Checkpoint path.")
     ap.add_argument("--device", type=str, default="cpu", help="Device for GRU blueprint (cpu|cuda).")
     ap.add_argument("--port", type=int, default=8000, help="Port for the local web server.")
+    ap.add_argument("--seed", type=int, default=0, help="RNG seed for the Hanabi game.")
     args = ap.parse_args()
 
     ckpt_path = Path(args.ckpt).resolve()
@@ -648,7 +706,7 @@ def main() -> None:
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
     blueprint_factory = lambda: NaiveGRUBlueprint(GRU_CFG(), ckpt_path, device=args.device)
-    payload = _play_one_game(blueprint_factory)
+    payload = _play_one_game(blueprint_factory, seed=args.seed)
 
     server = _start_server("127.0.0.1", args.port, payload)
     print(f"Serving Hanabi GUI on http://127.0.0.1:{args.port}")

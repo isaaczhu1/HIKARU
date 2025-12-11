@@ -198,7 +198,8 @@ class NaiveGRUBlueprint:
         )
 
         # Detach GRU state to prevent graph accumulation during rollout.
-        self._h = h_new.detach()
+        if update_state:
+            self._h = h_new.detach()
         logits = logits.squeeze(0)  # [1, num_moves]
 
         # Mask illegal actions
