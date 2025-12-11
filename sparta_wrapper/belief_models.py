@@ -10,10 +10,15 @@ from hanabi_learning_environment import pyhanabi
 
 from sparta_wrapper.hanabi_utils import (
     HanabiObservation,
-    _action_dict_to_move,
-    _move_to_action_dict,
     build_observation,
+    dict_to_move,
+    move_to_dict,
 )
+from sparta_wrapper.sparta_config import DEBUG
+
+def _debug(msg: str) -> None:
+    if DEBUG:
+        print(msg)
 
 from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
 _GAME_TEMPLATE = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
@@ -173,8 +178,12 @@ def _legal_moves_for_player(obs: HanabiObservation, actor_id: int) -> List[pyhan
 
 
 def _predict_partner(blueprint_factory, state, my_id, partner_id, my_hand_guess):
+    _debug(f"gucci {state} {my_id} {partner_id} {my_hand_guess}")
     primed_blueprint = blueprint_factory(state, partner_id, my_id, my_hand_guess)
+    _debug("primed peepeepoopoo")
     observation_fabricate = build_observation(primed_blueprint.initial_fabricated_state, partner_id)
+    _debug(str(observation_fabricate))
+    _debug("!!!!!!!!!!")
     return primed_blueprint.act(observation_fabricate, legal_moves=_legal_moves_for_player(observation_fabricate, partner_id))
 
 
@@ -226,7 +235,7 @@ def sample_world_state(
 
     it = 0
     while len(samples) < takes:
-        print("Try", it)
+        _debug(f"Try {it}")
         if it >= max_attempts:
             # print(f"Failed to generate, pumping out {takes - len(samples)} samples.")
             # fill with anything
@@ -235,18 +244,21 @@ def sample_world_state(
             break
             
         upstream_takes = (takes - len(samples)) * upstream_factor
+        _debug("Starting squid game....")
         candidate_hands = _sample_hand(remaining_deck, knowledge, HANABI_GAME_CONFIG["hand_size"], rng, upstream_takes)
+        _debug(str(candidate_hands))
 
         for hand in candidate_hands:
+            _debug(f"4head {[f'{pyhanabi.COLOR_CHAR[c]}{r + 1}' for c, r in hand]}")
             predicted_move = _predict_partner(blueprint_factory, lagging_state, observer_id, lagging_state.cur_player(), hand)
-            predicted_move_dict = _move_to_action_dict(predicted_move)
-            print(last_move["move"])
-            print("Predicted move dict:", predicted_move_dict)
+            predicted_move_dict = move_to_dict(predicted_move)
+            _debug(str(last_move["move"]))
+            _debug(f"Predicted move dict: {predicted_move_dict}")
             if last_move["move"] == predicted_move_dict:
-                print("Accepted hand:", hand)
+                _debug(f"Accepted hand: {hand}")
                 samples.append(hand)
             else:
-                print("Rejected hand:", hand)
+                _debug(f"Rejected hand: {hand}")
             if len(samples) >= takes:
                 break
 
@@ -309,13 +321,14 @@ def _is_compatible_with_last_move(
         return False
 
     try:
-        expected_move = _action_dict_to_move(last_move_dict)
+        move_spec = last_move_dict.get("move", last_move_dict)
+        expected_move = dict_to_move(None, move_spec)
     except Exception:
         return False
     partner_obs = build_observation(state_copy, partner)
     if not partner_obs.legal_moves:
         partner_obs.legal_moves = (expected_move,)
-        partner_obs.legal_moves_dict = [last_move_dict]
+        partner_obs.legal_moves_dict = [move_to_dict(expected_move)]
     blueprint = blueprint_factory()
     try:
         predicted = blueprint.act(partner_obs)

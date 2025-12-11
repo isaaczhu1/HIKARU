@@ -20,3 +20,6 @@ SPARTA_CONFIG = {
     "upstream_factor": 5,
     "max_attempts": 5,
 }
+
+# Enable noisy debug prints when True.
+DEBUG = True

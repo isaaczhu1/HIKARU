@@ -2,8 +2,8 @@
 
 Outline:
     - Imports: random/dataclasses/typing; pyhanabi/rl_env if needed; from sparta_wrapper
-      import sample_world_state, build_observation, _move_to_action_dict,
-      _action_dict_to_move, _advance_chance_events; blueprint factories
+      import sample_world_state, build_observation, move_to_dict,
+      dict_to_move, _advance_chance_events; blueprint factories
       (e.g., CkptGuardFactoryFactory), and SpartaConfig dataclass for rollout params.
 
     - Config dataclass SpartaConfig:
@@ -61,7 +61,7 @@ from sparta_wrapper.gru_blueprint import (
     NaiveGRUBlueprint,
     SamplerGRUFactoryFactory,
 )
-from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
+from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG, DEBUG
 
 class SpartaGRUWrapper:
     def __init__(self, ckpt_path, model_config, sparta_config, game: HanabiLookback1):
@@ -107,10 +107,12 @@ class SpartaGRUWrapper:
           3) Apply the candidate action for player_id.        # pseudocode placeholder
           4) Roll forward with blueprint actions until terminal; record final score.  # pseudocode placeholder
         """
-        print("Called _estimate_value with params ", state, player_id, action)
+        if DEBUG:
+            print("Called _estimate_value with params ", state, player_id, action)
         obs = build_observation(state, player_id)
         values: List[float] = []
-        print("Collecting samples...")
+        if DEBUG:
+            print("Collecting samples...")
         samples = sample_world_state(
             lagging_state=self.game.prev_state,
             obs=obs,
@@ -120,17 +122,25 @@ class SpartaGRUWrapper:
             upstream_factor=self.sparta_config["upstream_factor"],
             max_attempts=self.sparta_config["max_attempts"],
         )
+        if DEBUG:
+            print("Done with samples, priming factory...")
         primer_factory = FabricationPrimerFactoryFactory(self.model_config, self.ckpt_path)
-        # print("Iterating hands...")
+        if DEBUG:
+            print("Iterating hands...")
+            print(state)
         from tqdm import tqdm
         for hand_guess in tqdm(samples):
+            if DEBUG:
+                print("Shit", hand_guess, player_id)
             fabrication = FabricateRollout(state, player_id, hand_guess)
-            # print("Done fabricating...")
+            if DEBUG:
+                print("Done fabricating...")
             actors = [
                 primer_factory(fabrication.fabricated_move_history, pid)
                 for pid in range(HANABI_GAME_CONFIG["players"])
             ]
-            # print("Primed factories...")
+            if DEBUG:
+                print("Primed factories...")
 
             # Apply the candidate action from the root player, then proceed with chance draws.
             fabrication.apply_move(action)
@@ -138,7 +148,8 @@ class SpartaGRUWrapper:
 
             while not fabrication.is_terminal():
                 pid = fabrication.cur_player()
-                # print("One turn of rollout, current player", fabrication.cur_player())
+                if DEBUG:
+                    print("One turn of rollout, current player", fabrication.cur_player())
 
                 if pid == pyhanabi.CHANCE_PLAYER_ID:
                     fabrication.advance_chance_events()

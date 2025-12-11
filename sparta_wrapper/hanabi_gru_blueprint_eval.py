@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:  # pragma: no branch
     sys.path.insert(0, str(ROOT))
 
-from sparta_wrapper.hanabi_utils import _move_to_action_dict, build_observation
+from sparta_wrapper.hanabi_utils import build_observation, move_to_dict
 from sparta_wrapper.naive_gru_blueprint import GRU_CFG, HanabiGRUBlueprint
 
 
@@ -66,7 +66,7 @@ def _run_episode(env: rl_env.HanabiEnv, actors: List[Callable], render: bool = F
         prev_score = state.score()  # keep score before potentially losing a life
         player_obs = build_observation(state, pid)
         action_move = actors[pid](player_obs)
-        action_dict = _move_to_action_dict(action_move)
+        action_dict = move_to_dict(action_move)
         _, _, done, info = env.step(action_dict)
         state = env.state
         turn += 1
