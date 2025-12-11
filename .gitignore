@@ -4,3 +4,6 @@ hanabi_gru_baseline/__pycache__/
 *__pycache__/
 runs/
 tb/
+debug_log.txt
+debug_log2.txt
+debug3.txt

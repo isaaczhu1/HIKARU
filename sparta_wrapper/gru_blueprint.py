@@ -17,7 +17,7 @@ from hanabi_gru_baseline.config import CFG as GRU_CFG
 from hanabi_gru_baseline.model import HanabiGRUPolicy
 from hanabi_gru_baseline.utils import load_ckpt
 
-from sparta_wrapper.hanabi_utils import fabricate, build_observation, advance_state
+from sparta_wrapper.hanabi_utils import fabricate, build_observation, advance_state, _debug
 from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG, DEVICE, DEBUG
 
 
@@ -107,7 +107,7 @@ def _get_shared_model(model_config, model_ckpt_path, device: torch.device) -> _S
     _MODEL_CACHE[key] = shared
 
     if DEBUG:
-        print("Loaded shared model for GRU Blueprints")
+        _debug("Loaded shared model for GRU Blueprints")
     return shared
 
 
@@ -300,7 +300,7 @@ class NaiveGRUBlueprint:
             return pyhanabi.HanabiMove.get_reveal_rank_move(
                 int(move_dict["target_offset"]), int(move_dict["rank"])
             )
-        if action_type == "DEAL":
+        if action_type in ["DEAL", "DEAL_SPECIFIC"]:
             return None
         raise ValueError(f"Unsupported move dict: {move_dict}")
 
@@ -319,9 +319,11 @@ class MatureGRUBlueprint:
         game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
         fabricated_state = game.new_initial_state()
         for move in fabricate(state, my_id, hand_guess):
+            _debug(f"To fabricate: {move} {fabricated_state.cur_player()}")
             advance_state(fabricated_state, [move])
             if fabricated_state.cur_player() == partner_id:
                 self.naive_blueprint.act(build_observation(fabricated_state, partner_id))
+            _debug(f"{fabricated_state} {fabricated_state.cur_player()}")
 
         self.initial_fabricated_state = fabricated_state
 
@@ -344,17 +346,18 @@ class MatureGRUBlueprint:
         return self.naive_blueprint.act(obs, update_state=False, legal_moves=legal_moves)
 
 def SamplerGRUFactoryFactory(model_config, ckpt_path):
-    naive_blueprint = NaiveGRUBlueprint(model_config, ckpt_path)
     def PrimedBlueprintFactory(state: pyhanabi.HanabiState, partner_id: int, my_id: int, hand_guess):
+        naive_blueprint = NaiveGRUBlueprint(model_config, ckpt_path)
         primed_blueprint = MatureGRUBlueprint(naive_blueprint)
         primed_blueprint.prime(state, partner_id, my_id, hand_guess)
         return primed_blueprint
     return PrimedBlueprintFactory
 
 def FabricationPrimerFactoryFactory(model_config, ckpt_path):
-    naive_blueprint = NaiveGRUBlueprint(model_config, ckpt_path)
     def FabricationPrimerFactory(fabricated_history, pid):
+        naive_blueprint = NaiveGRUBlueprint(model_config, ckpt_path)
         primed_blueprint = MatureGRUBlueprint(naive_blueprint)
+        _debug(f"Primed {fabricated_history} {pid}")
         primed_blueprint.prime_fabrication(fabricated_history, pid)
         return primed_blueprint
     return FabricationPrimerFactory

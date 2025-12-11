@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List
 import sys
 import random
+import torch
 
 from hanabi_learning_environment import pyhanabi
 
@@ -25,6 +26,11 @@ def _format_card(card: pyhanabi.HanabiCard) -> str:
     rank = card.rank() + 1
     return f"{color}{rank}"
 
+def _format_hand(hand) -> str:
+    if not hand:
+        return "-"
+    return " ".join(f"{idx}:{_format_card(c)}" for idx, c in enumerate(hand))
+
 
 def _format_state(state: pyhanabi.HanabiState) -> List[str]:
     parts: List[str] = []
@@ -34,8 +40,7 @@ def _format_state(state: pyhanabi.HanabiState) -> List[str]:
     discard = " ".join(_format_card(c) for c in state.discard_pile())
     parts.append(f"Discard: {discard if discard else '-'}")
     for pid, hand in enumerate(state.player_hands()):
-        hand_s = " ".join(_format_card(c) for c in hand)
-        parts.append(f"P{pid} hand: {hand_s}")
+        parts.append(f"P{pid} hand: {_format_hand(hand)}")
     return parts
 
 
@@ -47,15 +52,18 @@ def _render_step(step: int, pid: int, action_dict, state: pyhanabi.HanabiState) 
         move_desc += f" color={action_dict['color']}"
     if "rank" in action_dict:
         move_desc += f" rank={action_dict['rank']}"
-    print(f"\n--- Turn {step} | Player {pid} plays {move_desc} ---")
+    print(f"\n--- Turn {step} | Player {pid} plays {move_desc} ---", flush=True)
     for line in _format_state(state):
-        print(line)
+        print(line, flush=True)
 
 
 def run_episode(seed: int, ckpt_path: Path, render: bool = True) -> float:
     rng = random.Random(seed)
     # Seed global RNGs to reduce nondeterminism inside helpers.
     random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
     game = HanabiLookback1(HANABI_GAME_CONFIG, seed)
     sparta_cfg = dict(SPARTA_CONFIG)
     sparta_cfg["rng_seed"] = seed
@@ -65,16 +73,16 @@ def run_episode(seed: int, ckpt_path: Path, render: bool = True) -> float:
     state = game.cur_state
 
     if render:
-        print("\n=== New Game ===")
+        print("\n=== New Game ===", flush=True)
         for line in _format_state(state):
-            print(line)
+            print(line, flush=True)
 
     while not state.is_terminal():
         pid = state.cur_player()
         obs = build_observation(state, pid)
-        print("Getting move...")
+        print("Getting move...", flush=True)
         move = agent.act(state, pid)
-        print("Done.")
+        print("Done.", flush=True)
         action_dict = move_to_dict(move)
 
         game.apply_move(move)
@@ -85,7 +93,7 @@ def run_episode(seed: int, ckpt_path: Path, render: bool = True) -> float:
             _render_step(turn, pid, action_dict, state)
 
     if render:
-        print(f"\n=== Terminal | Score {state.score()} ===")
+        print(f"\n=== Terminal | Score {state.score()} ===", flush=True)
     return float(state.score())
 
 
@@ -111,7 +119,7 @@ def main() -> None:
         scores.append(score)
 
     mean_score = sum(scores) / len(scores)
-    print(f"\nSPARTA mean score over {args.episodes} episodes: {mean_score:.3f}")
+    print(f"\nSPARTA mean score over {args.episodes} episodes: {mean_score:.3f}", flush=True)
 
 
 if __name__ == "__main__":

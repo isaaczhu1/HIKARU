@@ -1,61 +1,19 @@
-"""Pseudocode sketch for SPARTA 1-ply search wrapper.
-
-Outline:
-    - Imports: random/dataclasses/typing; pyhanabi/rl_env if needed; from sparta_wrapper
-      import sample_world_state, build_observation, move_to_dict,
-      dict_to_move, _advance_chance_events; blueprint factories
-      (e.g., CkptGuardFactoryFactory), and SpartaConfig dataclass for rollout params.
-
-    - Config dataclass SpartaConfig:
-        fields: num_rollouts (int), epsilon (float deviation threshold), rng_seed,
-        max_attempts, etc.
-
-    - Helper _rollout_return(state_clone, first_move, blueprint_factory):
-        apply first_move to state_clone; advance chance nodes.
-        while not terminal:
-            pid = state_clone.cur_player()
-            obs = build_observation(state_clone, pid)
-            move = blueprint_factory().act(obs)  # follow blueprint after first ply
-            state_clone.apply_move(move); _advance_chance_events(state_clone)
-        return final score (or accumulated reward).
-
-    - Class SpartaSingleAgent:
-        __init__(blueprint_factory, config): store factory/cfg, seed RNG.
-        act(state, player_id):
-            obs = build_observation(state, player_id)
-            bp = blueprint_factory(); bp_move = bp.act(obs)
-            legal = obs.legal_moves
-            For each move in legal:
-                Monte Carlo estimate Q:
-                    repeat cfg.num_rollouts:
-                        sample hidden world via sample_world_state(
-                            lagging_state=state, obs=obs, rng=self.rng,
-                            blueprint_factory=CkptGuardFactoryFactory(ckpt_path))
-                        # sample_world_state already applies sampled hands and primes GRU,
-                        # so no manual apply_sampled_hands or priming needed.
-                        state_clone = state.copy() consistent with sample
-                        G = _rollout_return(state_clone, move, blueprint_factory)
-                    Q[move] = mean(G)
-            best_move = argmax Q
-            if Q[best_move] - Q[bp_move] < cfg.epsilon:
-                return bp_move
-            return best_move
-
-Notes:
-    - This is single-ply improvement: only the first action varies; rest follow blueprint.
-    - Optional UCB/pruning/variance checks can be added before stopping rollouts per action.
-"""
-
 from __future__ import annotations
 
 import random
+import sys
 from dataclasses import dataclass
 from typing import List
 
 from hanabi_learning_environment import pyhanabi
 
 from sparta_wrapper.belief_models import sample_world_state
-from sparta_wrapper.hanabi_utils import FabricateRollout, build_observation, HanabiLookback1
+from sparta_wrapper.hanabi_utils import (
+    FabricateRollout,
+    _debug,
+    build_observation,
+    HanabiLookback1,
+)
 from sparta_wrapper.gru_blueprint import (
     FabricationPrimerFactoryFactory,
     NaiveGRUBlueprint,
@@ -108,11 +66,11 @@ class SpartaGRUWrapper:
           4) Roll forward with blueprint actions until terminal; record final score.  # pseudocode placeholder
         """
         if DEBUG:
-            print("Called _estimate_value with params ", state, player_id, action)
+            _debug(f"Called _estimate_value with params  {state} {player_id} {action}")
         obs = build_observation(state, player_id)
         values: List[float] = []
         if DEBUG:
-            print("Collecting samples...")
+            _debug("Collecting samples...")
         samples = sample_world_state(
             lagging_state=self.game.prev_state,
             obs=obs,
@@ -123,40 +81,51 @@ class SpartaGRUWrapper:
             max_attempts=self.sparta_config["max_attempts"],
         )
         if DEBUG:
-            print("Done with samples, priming factory...")
+            _debug("Done with samples, priming factory...")
         primer_factory = FabricationPrimerFactoryFactory(self.model_config, self.ckpt_path)
         if DEBUG:
-            print("Iterating hands...")
-            print(state)
+            _debug("Iterating hands...")
+            _debug(str(state))
         from tqdm import tqdm
+
         for hand_guess in tqdm(samples):
-            if DEBUG:
-                print("Shit", hand_guess, player_id)
+            _debug(f"Shit {hand_guess} {player_id}")
             fabrication = FabricateRollout(state, player_id, hand_guess)
-            if DEBUG:
-                print("Done fabricating...")
+            _debug("Done fabricating...")
             actors = [
                 primer_factory(fabrication.fabricated_move_history, pid)
                 for pid in range(HANABI_GAME_CONFIG["players"])
             ]
-            if DEBUG:
-                print("Primed factories...")
+            _debug("Primed factories...")
 
             # Apply the candidate action from the root player, then proceed with chance draws.
             fabrication.apply_move(action)
             fabrication.advance_chance_events()
 
+            _debug(fabrication.state)
+
+            _debug("stabilizing outputs...")
+            # import time
+            # time.sleep(0.1)
+
+
             while not fabrication.is_terminal():
                 pid = fabrication.cur_player()
                 if DEBUG:
-                    print("One turn of rollout, current player", fabrication.cur_player())
+                    _debug(f"One turn of rollout, current player {fabrication.cur_player()}")
 
                 if pid == pyhanabi.CHANCE_PLAYER_ID:
                     fabrication.advance_chance_events()
                     continue
 
+                _debug("making obs")
+                _debug(f"{fabrication.state} {pid}")
                 rollout_obs = build_observation(fabrication.state, pid)
+                _debug("made")
+                _debug(str(rollout_obs))
+                _debug("acting")
                 move = actors[pid].act(rollout_obs)
+                _debug(f"actor wants {move}")
                 fabrication.apply_move(move)
                 fabrication.advance_chance_events()
 

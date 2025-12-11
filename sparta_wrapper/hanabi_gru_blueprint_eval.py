@@ -25,6 +25,11 @@ def _format_card(card: pyhanabi.HanabiCard) -> str:
     rank = card.rank() + 1  # display 1-based rank
     return f"{color}{rank}"
 
+def _format_hand(hand) -> str:
+    if not hand:
+        return "-"
+    return " ".join(f"{idx}:{_format_card(c)}" for idx, c in enumerate(hand))
+
 
 def _format_state(state: pyhanabi.HanabiState) -> str:
     parts = []
@@ -36,8 +41,7 @@ def _format_state(state: pyhanabi.HanabiState) -> str:
     discard = " ".join(_format_card(c) for c in state.discard_pile())
     parts.append(f"Discard: {discard if discard else '-'}")
     for pid, hand in enumerate(state.player_hands()):
-        hand_s = " ".join(_format_card(c) for c in hand)
-        parts.append(f"P{pid} hand: {hand_s}")
+        parts.append(f"P{pid} hand: {_format_hand(hand)}")
     return "\n".join(parts)
 
 
@@ -49,16 +53,16 @@ def _render_step(step: int, pid: int, action_dict, state: pyhanabi.HanabiState) 
         move_desc += f" color={action_dict['color']}"
     if "rank" in action_dict:
         move_desc += f" rank={action_dict['rank']}"
-    print(f"\n--- Turn {step} | Player {pid} plays {move_desc} ---")
-    print(_format_state(state))
+    print(f"\n--- Turn {step} | Player {pid} plays {move_desc} ---", flush=True)
+    print(_format_state(state), flush=True)
 
 
 def _run_episode(env: rl_env.HanabiEnv, actors: List[Callable], render: bool = False) -> float:
     env.reset()
     state = env.state
     if render:
-        print("\n=== New Game ===")
-        print(_format_state(state))
+        print("\n=== New Game ===", flush=True)
+        print(_format_state(state), flush=True)
 
     turn = 0
     while not state.is_terminal():
@@ -128,7 +132,7 @@ def main() -> None:
         writer.flush()
         writer.close()
 
-    print(f"GRU blueprint mean over {args.episodes} episodes: {mean_score:.3f}")
+    print(f"GRU blueprint mean over {args.episodes} episodes: {mean_score:.3f}", flush=True)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import random
+import sys
+import warnings
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Sequence, Tuple
 
@@ -18,7 +20,7 @@ from sparta_wrapper.sparta_config import DEBUG
 
 def _debug(msg: str) -> None:
     if DEBUG:
-        print(msg)
+        print(msg, flush=True)
 
 from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
 _GAME_TEMPLATE = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
@@ -133,6 +135,7 @@ def _sample_hand(remaining_deck, knowledge, hand_size, rng, takes):
                 if deck_counts[chosen] <= 0:
                     deck_counts.pop(chosen, None)
         samples.append(hand)
+    _debug(samples)
     return samples
 
 
@@ -181,6 +184,7 @@ def _predict_partner(blueprint_factory, state, my_id, partner_id, my_hand_guess)
     _debug(f"gucci {state} {my_id} {partner_id} {my_hand_guess}")
     primed_blueprint = blueprint_factory(state, partner_id, my_id, my_hand_guess)
     _debug("primed peepeepoopoo")
+    _debug(primed_blueprint.initial_fabricated_state)
     observation_fabricate = build_observation(primed_blueprint.initial_fabricated_state, partner_id)
     _debug(str(observation_fabricate))
     _debug("!!!!!!!!!!")
@@ -237,8 +241,11 @@ def sample_world_state(
     while len(samples) < takes:
         _debug(f"Try {it}")
         if it >= max_attempts:
-            # print(f"Failed to generate, pumping out {takes - len(samples)} samples.")
-            # fill with anything
+            warnings.warn(
+                f"sample_world_state hit max_attempts={max_attempts} without matching last move "
+                f"{last_move['move']}; filling remaining {takes - len(samples)} samples unconditioned.",
+                RuntimeWarning,
+            )
             fill_hands = _sample_hand(remaining_deck, knowledge, HANABI_GAME_CONFIG["hand_size"], rng, takes - len(samples))
             samples.extend(fill_hands)
             break
@@ -299,39 +306,4 @@ def _compute_remaining_deck(obs: HanabiObservation) -> Dict[Card, int]:
     return {card: count for card, count in deck_counts.items() if count > 0}
 
 
-__all__ = ["WorldSample", "sample_world_state"]
-
-
-def _is_compatible_with_last_move(
-    base_state: pyhanabi.HanabiState,
-    sample: WorldSample,
-    last_move_dict: Dict[str, object],
-    blueprint_factory: Callable[[], object],
-) -> bool:
-    """Check whether the partner's last move matches the blueprint under the sampled world."""
-    # Clone state and apply sampled hands
-    state_copy = base_state.copy()
-    apply_sampled_hands(state_copy, sample)
-
-    try:
-        partner = int(last_move_dict.get("player", -1))
-    except Exception:
-        return False
-    if partner < 0 or partner >= state_copy.num_players():
-        return False
-
-    try:
-        move_spec = last_move_dict.get("move", last_move_dict)
-        expected_move = dict_to_move(None, move_spec)
-    except Exception:
-        return False
-    partner_obs = build_observation(state_copy, partner)
-    if not partner_obs.legal_moves:
-        partner_obs.legal_moves = (expected_move,)
-        partner_obs.legal_moves_dict = [move_to_dict(expected_move)]
-    blueprint = blueprint_factory()
-    try:
-        predicted = blueprint.act(partner_obs)
-    except Exception:
-        return False
-    return predicted == expected_move
+__all__ = ["sample_world_state", "_sample_hand"]
