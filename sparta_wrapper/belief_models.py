@@ -74,19 +74,60 @@ def _hand_multiplicity(remaining_deck, hand):
 
 # tested
 def _sample_hand(remaining_deck, knowledge, hand_size, rng, takes):
-    """Approximate sampling of a plausible hand using the distinct-hand iterator."""
-    samples = [None for _ in range(takes)]
-    idx = 0
-    for hand in _iter_all_hands(remaining_deck, knowledge, hand_size):
-        # Reservoir sampling to avoid materializing all hands.
-        multiplicity = _hand_multiplicity(remaining_deck, hand)
-        # print("hand", hand, "multiplicity", multiplicity)
-        # print("SUPER PISS", multiplicity, idx + multiplicity)
-        for take_idx in range(takes):
-            if idx == 0 or rng.random() < multiplicity / (idx + multiplicity):
-                samples[take_idx] = hand
-        idx += multiplicity
-    rng.shuffle(samples)
+    """Approximate sampling of a plausible hand via per-slot marginal draws."""
+
+    def _sample_single():
+        deck_counts = dict(remaining_deck)
+        hand = []
+        for pos in range(hand_size):
+            slot_knowledge = knowledge[-hand_size + pos]
+            candidates = [
+                (card, ct)
+                for card, ct in deck_counts.items()
+                if ct > 0 and slot_knowledge.color_plausible(card[0]) and slot_knowledge.rank_plausible(card[1])
+            ]
+            if not candidates:
+                return None
+            total = sum(ct for _, ct in candidates)
+            pick = rng.uniform(0, total)
+            acc = 0.0
+            chosen = candidates[-1][0]
+            for card, ct in candidates:
+                acc += ct
+                if pick <= acc:
+                    chosen = card
+                    break
+            hand.append(chosen)
+            deck_counts[chosen] -= 1
+            if deck_counts[chosen] <= 0:
+                deck_counts.pop(chosen, None)
+        return hand
+
+    samples = []
+    for _ in range(takes):
+        hand = _sample_single()
+        if hand is None:
+            # If knowledge is too restrictive, ignore it and sample uniformly from remaining counts.
+            deck_counts = dict(remaining_deck)
+            hand = []
+            for _ in range(hand_size):
+                if not deck_counts:
+                    break
+                pool = list(deck_counts.items())
+                total = sum(ct for _, ct in pool)
+                pick = rng.uniform(0, total)
+                acc = 0.0
+                chosen = pool[-1][0]
+                for card, ct in pool:
+                    acc += ct
+                    if pick <= acc:
+                        chosen = card
+                        break
+                hand.append(chosen)
+                deck_counts[chosen] -= 1
+                if deck_counts[chosen] <= 0:
+                    deck_counts.pop(chosen, None)
+        samples.append(hand)
     return samples
 
 
@@ -132,28 +173,9 @@ def _legal_moves_for_player(obs: HanabiObservation, actor_id: int) -> List[pyhan
 
 
 def _predict_partner(blueprint_factory, state, my_id, partner_id, my_hand_guess):
-    # my_hand_guess: list of (color_idx_or_char, rank)
-    obs = build_observation(state, partner_id)
-
-    # Pretend it's the partner's turn; rebuild legal moves for that viewpoint.
-    obs.current_player = partner_id
-    obs.current_player_offset = 0
-    obs.legal_moves = _legal_moves_for_player(obs, partner_id)
-    obs.legal_moves_dict = [_move_to_action_dict(move) for move in obs.legal_moves]
-
-    # Override what the partner sees in your hand with the hypothesis.
-    obs.observed_hands[my_id] = [
-        {
-            "color": c if isinstance(c, str) else pyhanabi.COLOR_CHAR[c],
-            "rank": int(r),
-        }
-        for c, r in my_hand_guess
-    ]
-
-    # (Optional) If your hypothesis changes hint legality, rebuild legal moves accordingly;
-    # for most play/discard choices the existing legal_moves are fine.
-
-    return blueprint_factory(state, partner_id, my_id, my_hand_guess).act(obs)
+    primed_blueprint = blueprint_factory(state, partner_id, my_id, my_hand_guess)
+    observation_fabricate = build_observation(primed_blueprint.initial_fabricated_state, partner_id)
+    return primed_blueprint.act(observation_fabricate, legal_moves=_legal_moves_for_player(observation_fabricate, partner_id))
 
 
 def sample_world_state(
@@ -177,6 +199,11 @@ def sample_world_state(
 
     Returns the updated list of compatible hands.
     """
+    if lagging_state is None:
+        # No conditioning on last move
+        knowledge = obs.raw_observation.card_knowledge()[0]
+        return _sample_hand(_compute_remaining_deck(obs), knowledge, HANABI_GAME_CONFIG["hand_size"], rng, takes)
+
     cur_player_offset = obs.current_player_offset
 
     if cur_player_offset == -1:
@@ -199,7 +226,7 @@ def sample_world_state(
 
     it = 0
     while len(samples) < takes:
-        
+        print("Try", it)
         if it >= max_attempts:
             # print(f"Failed to generate, pumping out {takes - len(samples)} samples.")
             # fill with anything
@@ -213,13 +240,13 @@ def sample_world_state(
         for hand in candidate_hands:
             predicted_move = _predict_partner(blueprint_factory, lagging_state, observer_id, lagging_state.cur_player(), hand)
             predicted_move_dict = _move_to_action_dict(predicted_move)
-            # print(last_move["move"])
-            # print("Predicted move dict:", predicted_move_dict)
+            print(last_move["move"])
+            print("Predicted move dict:", predicted_move_dict)
             if last_move["move"] == predicted_move_dict:
-                # print("Accepted hand:", hand)
+                print("Accepted hand:", hand)
                 samples.append(hand)
-            # else:
-            #    print("Rejected hand:", hand)
+            else:
+                print("Rejected hand:", hand)
             if len(samples) >= takes:
                 break
 
