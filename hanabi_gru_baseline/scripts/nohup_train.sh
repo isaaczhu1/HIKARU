@@ -6,12 +6,11 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 TS="$(date +"%Y%m%d_%H%M%S")"
 DEVICE="${DEVICE:-cuda}"
-TOTAL_UPDATES="${TOTAL_UPDATES:-1000}"
-LR="${LR:-1e-4}"
+TOTAL_UPDATES="${TOTAL_UPDATES:-20000}"
+LR="${LR:-3e-5}"
 LR_FINAL="${LR_FINAL:-3e-5}"
 # CKPT="${CKPT:-runs/hanabi/isaacs_first_run/ckpt_010000.pt}"
-# CKPT="${CKPT:-runs/hanabi/standard_train/ckpt_000200.pt}"
-CKPT="${CKPT:-}"
+CKPT="${CKPT:-runs/hanabi/standard_train/20251210_005554/ckpt_020000.pt}"
 SAVE_DIR="${SAVE_DIR:-runs/hanabi/standard_train/$TS}"
 DEBUG="${DEBUG:-0}"        # 1 to pass --debug
 ASYNC_ENV="${ASYNC_ENV:-0}" # 1 to pass --async-env
@@ -20,12 +19,12 @@ SEQ_LEN="${SEQ_LEN:-1}"     # optional PPO seq_len override
 START_UPDATE="${START_UPDATE:-0}" # optional override for starting update counter
 
 # Additional config visibility (defined in config.py; change there to affect runs)
-SEED="${SEED:-67}"
+SEED="${SEED:-42}"
 NUM_ENVS="${NUM_ENVS:-64}"
 UNROLL_T="${UNROLL_T:-128}"
 OBS_MODE="${OBS_MODE:-minimal}"
-LOG_INTERVAL="${LOG_INTERVAL:-1}"
-SAVE_INTERVAL="${SAVE_INTERVAL:-50}"
+LOG_INTERVAL="${LOG_INTERVAL:-10}"
+SAVE_INTERVAL="${SAVE_INTERVAL:-500}"
 
 LOG_DIR="runs/hanabi/standard_train/logs"
 mkdir -p "$LOG_DIR"
