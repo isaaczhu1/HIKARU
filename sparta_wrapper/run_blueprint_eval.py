@@ -52,7 +52,7 @@ def main() -> None:
         writer.flush()
         writer.close()
 
-    print(f"{args.blueprint} mean over {args.episodes} episodes: {mean_score:.3f}")
+    print(f"{args.blueprint} mean over {args.episodes} episodes: {mean_score:.3f}", flush=True)
 
 
 if __name__ == "__main__":

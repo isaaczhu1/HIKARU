@@ -709,8 +709,8 @@ def main() -> None:
     payload = _play_one_game(blueprint_factory, seed=args.seed)
 
     server = _start_server("127.0.0.1", args.port, payload)
-    print(f"Serving Hanabi GUI on http://127.0.0.1:{args.port}")
-    print("Press Ctrl+C to stop.")
+    print(f"Serving Hanabi GUI on http://127.0.0.1:{args.port}", flush=True)
+    print("Press Ctrl+C to stop.", flush=True)
     try:
         while True:
             threading.Event().wait(1.0)

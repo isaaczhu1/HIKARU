@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import sys
 from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence
@@ -12,7 +13,7 @@ from sparta_wrapper.sparta_config import DEBUG, HANABI_GAME_CONFIG
 
 def _debug(msg: str) -> None:
     if DEBUG:
-        print(msg)
+        print(msg, flush=True)
 
 
 def _card_to_dict(card: pyhanabi.HanabiCard) -> Dict[str, Any]:
@@ -163,9 +164,12 @@ def apply_move_safe(state: pyhanabi.HanabiState, move: Any) -> None:
       - (player, color, rank) tuples/lists for DEAL events (applied via deal_specific_card)
     """
     if isinstance(move, (list, tuple)) and len(move) == 3 and not isinstance(move, pyhanabi.HanabiMove):
+        _debug(f"Trying deal {move}")
         state.deal_specific_card(*move)
         return
     cloned = _clone_move_for_state(move)
+    _debug(str(state))
+    _debug(f"cloned move to  {move}")
     state.apply_move(cloned)
 
 
@@ -317,6 +321,7 @@ def unmask_card(move):
     rank = int(rank_char) - 1
     return color, rank
 
+'''
 DEAL_TYPE_MOVES = [[[None for rank in range(HANABI_GAME_CONFIG["ranks"])] for color in range(HANABI_GAME_CONFIG["colors"])] for player in range(HANABI_GAME_CONFIG["players"])]
 needed = HANABI_GAME_CONFIG["ranks"] * HANABI_GAME_CONFIG["colors"] * HANABI_GAME_CONFIG["players"]
 game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
@@ -336,9 +341,8 @@ while needed > 0:
                 needed -= 1
 
 if DEBUG:
-    print(DEAL_TYPE_MOVES)
+    print(DEAL_TYPE_MOVES, flush=True)
 
-'''
 _save_game = game
 _save_deal_move_000 = DEAL_TYPE_MOVES[0][0][0]
 _save_deal_move_001 = DEAL_TYPE_MOVES[0][0][1]
@@ -411,6 +415,7 @@ def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[py
     deck = []
 
     for move in state.move_history():
+        _debug(f"{deck_tracking} {deal_to} {move}")
         if move.player() == -1:
             if deck_idx < initial_deal_length:
                 deal_to.append(deck_idx // hand_size)
@@ -425,6 +430,7 @@ def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[py
             last_acting_player = move.player()
             position = move.move().card_index()
             deck_tracking[last_acting_player].pop(last_acting_player)
+    _debug(f"{deck_tracking} {deal_to}")
 
     # Step 2: fabricate!
     for pos, card in zip(deck_tracking[player_id], fabricated_hand):
@@ -439,6 +445,8 @@ def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[py
             deck_ptr += 1
         else:
             fabricated_move_history.append(move_to_dict(move.move()))
+
+    _debug(f"{fabricated_move_history} {deck_ptr} {deck}")
             
     if verbose:
         return fabricated_move_history, deck
@@ -484,7 +492,18 @@ class FabricateRollout:
         self.deck_ptr = 0
         self.deal_to = None
 
+        _debug(
+            f"fabricated init state={self.state} remaining_deck={self.remaining_deck} "
+            f"deck_ptr={self.deck_ptr} deal_to={self.deal_to} history={self.fabricated_move_history}"
+        )
+
         advance_state(self.state, self.fabricated_move_history)
+        _debug("Advanced fabricated history")
+        _debug(
+            f"fabricated after advance state={self.state} remaining_deck={self.remaining_deck} "
+            f"deck_ptr={self.deck_ptr} deal_to={self.deal_to}"
+        )
+
 
     def is_terminal(self):
         return self.state.is_terminal()
@@ -502,6 +521,8 @@ class FabricateRollout:
 
         if move_obj.type() in (pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD):
             self.deal_to = self.state.cur_player()
+
+        _debug(f"cloned move to {move_obj}")
         
         apply_move_safe(self.state, move_obj)
 
@@ -523,5 +544,6 @@ __all__ = [
     "apply_move_to_state",
     "apply_move_safe",
     "unmask_card",
-    "fabricate"
+    "fabricate",
+    "FabricateRollout"
 ]

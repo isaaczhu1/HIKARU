@@ -1,0 +1,201 @@
+
+=== New Game ===
+Score: 0 | Deck: 40 | Info: 8 | Lives: 3
+Fireworks: R:0 Y:0 G:0 B:0 W:0
+Discard: -
+P0 hand: 0:G5 1:W1 2:W2 3:W1 4:G4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:G2
+Getting move...
+Loaded shared model for GRU Blueprints
+Called _estimate_value with params  Life tokens: 3
+Info tokens: 8
+Fireworks: R0 Y0 G0 B0 W0 
+Hands:
+Cur player
+G5 || XX|RYGBW12345
+W1 || XX|RYGBW12345
+W2 || XX|RYGBW12345
+W1 || XX|RYGBW12345
+G4 || XX|RYGBW12345
+-----
+Y4 || XX|RYGBW12345
+Y2 || XX|RYGBW12345
+R1 || XX|RYGBW12345
+Y1 || XX|RYGBW12345
+G2 || XX|RYGBW12345
+Deck size: 40
+Discards: 0 (Play 0)
+Collecting samples...
+[[(1, 0), (3, 4), (3, 2), (4, 4), (0, 4)], [(3, 3), (2, 2), (2, 2), (0, 0), (4, 4)], [(4, 0), (4, 0), (2, 0), (1, 0), (4, 3)], [(4, 1), (3, 3), (2, 0), (4, 0), (1, 2)]]
+Done with samples, priming factory...
+Iterating hands...
+Life tokens: 3
+Info tokens: 8
+Fireworks: R0 Y0 G0 B0 W0 
+Hands:
+Cur player
+G5 || XX|RYGBW12345
+W1 || XX|RYGBW12345
+W2 || XX|RYGBW12345
+W1 || XX|RYGBW12345
+G4 || XX|RYGBW12345
+-----
+Y4 || XX|RYGBW12345
+Y2 || XX|RYGBW12345
+R1 || XX|RYGBW12345
+Y1 || XX|RYGBW12345
+G2 || XX|RYGBW12345
+Deck size: 40
+Discards:
+Shit [(1, 0), (3, 4), (3, 2), (4, 4), (0, 4)] 0
+[[], []] [] <(Deal G5)>
+[[0], []] [0] <(Deal W1)>
+[[0, 1], []] [0, 0] <(Deal W2)>
+[[0, 1, 2], []] [0, 0, 0] <(Deal W1)>
+[[0, 1, 2, 3], []] [0, 0, 0, 0] <(Deal G4)>
+[[0, 1, 2, 3, 4], []] [0, 0, 0, 0, 0] <(Deal Y4)>
+[[0, 1, 2, 3, 4], [5]] [0, 0, 0, 0, 0, 1] <(Deal Y2)>
+[[0, 1, 2, 3, 4], [5, 6]] [0, 0, 0, 0, 0, 1, 1] <(Deal R1)>
+[[0, 1, 2, 3, 4], [5, 6, 7]] [0, 0, 0, 0, 0, 1, 1, 1] <(Deal Y1)>
+[[0, 1, 2, 3, 4], [5, 6, 7, 8]] [0, 0, 0, 0, 0, 1, 1, 1, 1] <(Deal G2)>
+[[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]] [0, 0, 0, 0, 0, 1, 1, 1, 1, 1]
+[(0, 1, 0), (0, 3, 4), (0, 3, 2), (0, 4, 4), (0, 0, 4), (1, 1, 3), (1, 1, 1), (1, 0, 0), (1, 1, 0), (1, 2, 1)] 10 [(1, 0), (3, 4), (3, 2), (4, 4), (0, 4), (1, 3), (1, 1), (0, 0), (1, 0), (2, 1)]
+fabricated init state=Life tokens: 3
+Info tokens: 8
+Fireworks: R0 Y0 G0 B0 W0 
+Hands:
+-----
+Deck size: 50
+Discards: remaining_deck=[(0, 0), (3, 1), (1, 3), (2, 3), (3, 3), (2, 0), (4, 3), (4, 1), (0, 0), (2, 3), (0, 3), (0, 2), (1, 2), (1, 4), (2, 0), (4, 2), (2, 4), (4, 3), (3, 0), (2, 1), (1, 0), (4, 1), (0, 1), (4, 0), (1, 1), (0, 2), (4, 2), (0, 3), (3, 2), (2, 2), (1, 2), (3, 3), (2, 2), (3, 0), (4, 0), (4, 0), (2, 0), (0, 1), (3, 1), (3, 0)] deck_ptr=0 deal_to=None history=[(0, 1, 0), (0, 3, 4), (0, 3, 2), (0, 4, 4), (0, 0, 4), (1, 1, 3), (1, 1, 1), (1, 0, 0), (1, 1, 0), (1, 2, 1)]
+Trying deal (0, 1, 0)
+Trying deal (0, 3, 4)
+Trying deal (0, 3, 2)
+Trying deal (0, 4, 4)
+Trying deal (0, 0, 4)
+Trying deal (1, 1, 3)
+Trying deal (1, 1, 1)
+Trying deal (1, 0, 0)
+Trying deal (1, 1, 0)
+Trying deal (1, 2, 1)
+Advanced fabricated history
+fabricated after advance state=Life tokens: 3
+Info tokens: 8
+Fireworks: R0 Y0 G0 B0 W0 
+Hands:
+Cur player
+Y1 || XX|RYGBW12345
+B5 || XX|RYGBW12345
+B3 || XX|RYGBW12345
+W5 || XX|RYGBW12345
+R5 || XX|RYGBW12345
+-----
+Y4 || XX|RYGBW12345
+Y2 || XX|RYGBW12345
+R1 || XX|RYGBW12345
+Y1 || XX|RYGBW12345
+G2 || XX|RYGBW12345
+Deck size: 40
+Discards: remaining_deck=[(0, 0), (3, 1), (1, 3), (2, 3), (3, 3), (2, 0), (4, 3), (4, 1), (0, 0), (2, 3), (0, 3), (0, 2), (1, 2), (1, 4), (2, 0), (4, 2), (2, 4), (4, 3), (3, 0), (2, 1), (1, 0), (4, 1), (0, 1), (4, 0), (1, 1), (0, 2), (4, 2), (0, 3), (3, 2), (2, 2), (1, 2), (3, 3), (2, 2), (3, 0), (4, 0), (4, 0), (2, 0), (0, 1), (3, 1), (3, 0)] deck_ptr=0 deal_to=None
+Done fabricating...
+Primed [(0, 1, 0), (0, 3, 4), (0, 3, 2), (0, 4, 4), (0, 0, 4), (1, 1, 3), (1, 1, 1), (1, 0, 0), (1, 1, 0), (1, 2, 1)] 0
+Trying deal (0, 1, 0)
+Trying deal (0, 3, 4)
+Trying deal (0, 3, 2)
+Trying deal (0, 4, 4)
+Trying deal (0, 0, 4)
+Trying deal (1, 1, 3)
+Trying deal (1, 1, 1)
+Trying deal (1, 0, 0)
+Trying deal (1, 1, 0)
+Trying deal (1, 2, 1)
+Primed [(0, 1, 0), (0, 3, 4), (0, 3, 2), (0, 4, 4), (0, 0, 4), (1, 1, 3), (1, 1, 1), (1, 0, 0), (1, 1, 0), (1, 2, 1)] 1
+Trying deal (0, 1, 0)
+Trying deal (0, 3, 4)
+Trying deal (0, 3, 2)
+Trying deal (0, 4, 4)
+Trying deal (0, 0, 4)
+Trying deal (1, 1, 3)
+Trying deal (1, 1, 1)
+Trying deal (1, 0, 0)
+Trying deal (1, 1, 0)
+Trying deal (1, 2, 1)
+Primed factories...
+cloned move to (Play 0)
+Life tokens: 3
+Info tokens: 8
+Fireworks: R0 Y0 G0 B0 W0 
+Hands:
+Cur player
+Y1 || XX|RYGBW12345
+B5 || XX|RYGBW12345
+B3 || XX|RYGBW12345
+W5 || XX|RYGBW12345
+R5 || XX|RYGBW12345
+-----
+Y4 || XX|RYGBW12345
+Y2 || XX|RYGBW12345
+R1 || XX|RYGBW12345
+Y1 || XX|RYGBW12345
+G2 || XX|RYGBW12345
+Deck size: 40
+Discards:
+cloned move to  (Play 0)
+Life tokens: 3
+Info tokens: 8
+Fireworks: R0 Y1 G0 B0 W0 
+Hands:
+B5 || XX|RYGBW12345
+B3 || XX|RYGBW12345
+W5 || XX|RYGBW12345
+R5 || XX|RYGBW12345
+R1 || XX|RYGBW12345
+-----
+Cur player
+Y4 || XX|RYGBW12345
+Y2 || XX|RYGBW12345
+R1 || XX|RYGBW12345
+Y1 || XX|RYGBW12345
+G2 || XX|RYGBW12345
+Deck size: 39
+Discards:
+stabilizing outputs...
+One turn of rollout, current player 1
+making obs
+Life tokens: 3
+Info tokens: 8
+Fireworks: R0 Y1 G0 B0 W0 
+Hands:
+B5 || XX|RYGBW12345
+B3 || XX|RYGBW12345
+W5 || XX|RYGBW12345
+R5 || XX|RYGBW12345
+R1 || XX|RYGBW12345
+-----
+Cur player
+Y4 || XX|RYGBW12345
+Y2 || XX|RYGBW12345
+R1 || XX|RYGBW12345
+Y1 || XX|RYGBW12345
+G2 || XX|RYGBW12345
+Deck size: 39
+Discards: 1
+made
+HanabiObservation(player_id=1, current_player=1, current_player_offset=0, observed_hands=[[{'color': None, 'rank': -1}, {'color': None, 'rank': -1}, {'color': None, 'rank': -1}, {'color': None, 'rank': -1}, {'color': None, 'rank': -1}], [{'color': 'B', 'rank': 4}, {'color': 'B', 'rank': 2}, {'color': 'W', 'rank': 4}, {'color': 'R', 'rank': 4}, {'color': 'R', 'rank': 0}]], card_knowledge=[[{'color': None, 'rank': None, 'mask': [[True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True]]}, {'color': None, 'rank': None, 'mask': [[True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True]]}, {'color': None, 'rank': None, 'mask': [[True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True]]}, {'color': None, 'rank': None, 'mask': [[True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True]]}, {'color': None, 'rank': None, 'mask': [[True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True]]}], [{'color': None, 'rank': None, 'mask': [[True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True]]}, {'color': None, 'rank': None, 'mask': [[True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True]]}, {'color': None, 'rank': None, 'mask': [[True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True]]}, {'color': None, 'rank': None, 'mask': [[True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True]]}, {'color': None, 'rank': None, 'mask': [[True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True], [True, True, True, True, True]]}]], discard_pile=[], fireworks={'R': 0, 'Y': 1, 'G': 0, 'B': 0, 'W': 0}, deck_size=39, information_tokens=8, life_tokens=3, raw_observation=Life tokens: 3
+Info tokens: 8
+Fireworks: R0 Y1 G0 B0 W0 
+Hands:
+Cur player
+XX || XX|RYGBW12345
+XX || XX|RYGBW12345
+XX || XX|RYGBW12345
+XX || XX|RYGBW12345
+XX || XX|RYGBW12345
+-----
+B5 || XX|RYGBW12345
+B3 || XX|RYGBW12345
+W5 || XX|RYGBW12345
+R5 || XX|RYGBW12345
+R1 || XX|RYGBW12345
+Deck size: 39
+Discards:, legal_moves=[(Play 0), (Play 1), (Play 2), (Play 3), (Play 4), (Reveal player +1 color R), (Reveal player +1 color B), (Reveal player +1 color W), (Reveal player +1 rank 1), (Reveal player +1 rank 3), (Reveal player +1 rank 5)], legal_moves_dict=[{'action_type': 'PLAY', 'type': 'PLAY', 'card_index': 0}, {'action_type': 'PLAY', 'type': 'PLAY', 'card_index': 1}, {'action_type': 'PLAY', 'type': 'PLAY', 'card_index': 2}, {'action_type': 'PLAY', 'type': 'PLAY', 'card_index': 3}, {'action_type': 'PLAY', 'type': 'PLAY', 'card_index': 4}, {'action_type': 'REVEAL_COLOR', 'type': 'REVEAL_COLOR', 'target_offset': 1, 'color': 'R'}, {'action_type': 'REVEAL_COLOR', 'type': 'REVEAL_COLOR', 'target_offset': 1, 'color': 'B'}, {'action_type': 'REVEAL_COLOR', 'type': 'REVEAL_COLOR', 'target_offset': 1, 'color': 'W'}, {'action_type': 'REVEAL_RANK', 'type': 'REVEAL_RANK', 'target_offset': 1, 'rank': 0}, {'action_type': 'REVEAL_RANK', 'type': 'REVEAL_RANK', 'target_offset': 1, 'rank': 2}, {'action_type': 'REVEAL_RANK', 'type': 'REVEAL_RANK', 'target_offset': 1, 'rank': 4}], last_moves=[{'player': 0, 'move': {'action_type': 'DEAL_SPECIFIC', 'type': 'DEAL_SPECIFIC', 'card_index': 4, 'target_offset': 0, 'color': 0, 'rank': 0}, 'scored': False, 'information_token': False, 'color': None, 'rank': -1, 'card_info_revealed': [], 'card_info_newly_revealed': []}, {'player': 1, 'move': {'action_type': 'PLAY', 'type': 'PLAY', 'card_index': 0}, 'scored': True, 'information_token': False, 'color': 'Y', 'rank': 0, 'card_info_revealed': [], 'card_info_newly_revealed': []}])
+acting
