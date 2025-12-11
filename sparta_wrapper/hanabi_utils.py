@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence
 
@@ -87,12 +89,17 @@ def _action_dict_to_move(data: Dict[str, Any]) -> pyhanabi.HanabiMove:
             color_idx = pyhanabi.color_char_to_idx(color)
         else:
             color_idx = int(color)
+        if color_idx < 0 or color_idx >= HANABI_GAME_CONFIG["colors"]:
+            raise ValueError(f"Reveal color out of range: {color_idx}")
         return pyhanabi.HanabiMove.get_reveal_color_move(
             int(data["target_offset"]), color_idx
         )
     if move_type == pyhanabi.HanabiMoveType.REVEAL_RANK:
+        rank = int(data["rank"])
+        if rank < 0 or rank >= HANABI_GAME_CONFIG["ranks"]:
+            raise ValueError(f"Reveal rank out of range: {rank}")
         return pyhanabi.HanabiMove.get_reveal_rank_move(
-            int(data["target_offset"]), int(data["rank"])
+            int(data["target_offset"]), rank
         )
     raise ValueError(f"Unsupported move payload: {data}")
 
@@ -165,8 +172,8 @@ class HanabiObservation:
 def build_observation(state: pyhanabi.HanabiState, player_id: int) -> HanabiObservation:
     """Construct a structured observation for ``player_id`` from a state."""
     obs = state.observation(player_id)
-    num_colors = len(obs.fireworks())
-    num_ranks = 5  # standard Hanabi; extend if needed
+    num_colors = HANABI_GAME_CONFIG["colors"]
+    num_ranks = HANABI_GAME_CONFIG["ranks"]
     legal_moves = obs.legal_moves()
     observed_hands = [_hand_to_dict(hand) for hand in obs.observed_hands()]
     card_knowledge = [
@@ -176,7 +183,6 @@ def build_observation(state: pyhanabi.HanabiState, player_id: int) -> HanabiObse
     discard_pile = [_card_to_dict(card) for card in obs.discard_pile()]
     fireworks = _fireworks_to_dict(obs.fireworks())
     last_moves = [_history_item_to_dict(m) for m in obs.last_moves()]
-
     return HanabiObservation(
         player_id=player_id,
         current_player=state.cur_player(),
@@ -282,8 +288,66 @@ while needed > 0:
                 DEAL_TYPE_MOVES[player][color][rank] = move.move()
                 needed -= 1
 
+print(DEAL_TYPE_MOVES)
 
-def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[pyhanabi.HanabiCard]]):
+'''
+_save_game = game
+_save_deal_move_000 = DEAL_TYPE_MOVES[0][0][0]
+_save_deal_move_001 = DEAL_TYPE_MOVES[0][0][1]
+_save_deal_move_002 = DEAL_TYPE_MOVES[0][0][2]
+_save_deal_move_003 = DEAL_TYPE_MOVES[0][0][3]
+_save_deal_move_004 = DEAL_TYPE_MOVES[0][0][4]
+_save_deal_move_010 = DEAL_TYPE_MOVES[0][1][0]
+_save_deal_move_011 = DEAL_TYPE_MOVES[0][1][1]
+_save_deal_move_012 = DEAL_TYPE_MOVES[0][1][2]
+_save_deal_move_013 = DEAL_TYPE_MOVES[0][1][3]
+_save_deal_move_014 = DEAL_TYPE_MOVES[0][1][4]
+_save_deal_move_020 = DEAL_TYPE_MOVES[0][2][0]
+_save_deal_move_021 = DEAL_TYPE_MOVES[0][2][1]
+_save_deal_move_022 = DEAL_TYPE_MOVES[0][2][2]
+_save_deal_move_023 = DEAL_TYPE_MOVES[0][2][3]
+_save_deal_move_024 = DEAL_TYPE_MOVES[0][2][4]
+_save_deal_move_030 = DEAL_TYPE_MOVES[0][3][0]
+_save_deal_move_031 = DEAL_TYPE_MOVES[0][3][1]
+_save_deal_move_032 = DEAL_TYPE_MOVES[0][3][2]
+_save_deal_move_033 = DEAL_TYPE_MOVES[0][3][3]
+_save_deal_move_034 = DEAL_TYPE_MOVES[0][3][4]
+_save_deal_move_040 = DEAL_TYPE_MOVES[0][4][0]
+_save_deal_move_041 = DEAL_TYPE_MOVES[0][4][1]
+_save_deal_move_042 = DEAL_TYPE_MOVES[0][4][2]
+_save_deal_move_043 = DEAL_TYPE_MOVES[0][4][3]
+_save_deal_move_044 = DEAL_TYPE_MOVES[0][4][4]
+_save_deal_move_100 = DEAL_TYPE_MOVES[1][0][0]
+_save_deal_move_101 = DEAL_TYPE_MOVES[1][0][1]
+_save_deal_move_102 = DEAL_TYPE_MOVES[1][0][2]
+_save_deal_move_103 = DEAL_TYPE_MOVES[1][0][3]
+_save_deal_move_104 = DEAL_TYPE_MOVES[1][0][4]
+_save_deal_move_110 = DEAL_TYPE_MOVES[1][1][0]
+_save_deal_move_111 = DEAL_TYPE_MOVES[1][1][1]
+_save_deal_move_112 = DEAL_TYPE_MOVES[1][1][2]
+_save_deal_move_113 = DEAL_TYPE_MOVES[1][1][3]
+_save_deal_move_114 = DEAL_TYPE_MOVES[1][1][4]
+_save_deal_move_120 = DEAL_TYPE_MOVES[1][2][0]
+_save_deal_move_121 = DEAL_TYPE_MOVES[1][2][1]
+_save_deal_move_122 = DEAL_TYPE_MOVES[1][2][2]
+_save_deal_move_123 = DEAL_TYPE_MOVES[1][2][3]
+_save_deal_move_124 = DEAL_TYPE_MOVES[1][2][4]
+_save_deal_move_130 = DEAL_TYPE_MOVES[1][3][0]
+_save_deal_move_131 = DEAL_TYPE_MOVES[1][3][1]
+_save_deal_move_132 = DEAL_TYPE_MOVES[1][3][2]
+_save_deal_move_133 = DEAL_TYPE_MOVES[1][3][3]
+_save_deal_move_134 = DEAL_TYPE_MOVES[1][3][4]
+_save_deal_move_140 = DEAL_TYPE_MOVES[1][4][0]
+_save_deal_move_141 = DEAL_TYPE_MOVES[1][4][1]
+_save_deal_move_142 = DEAL_TYPE_MOVES[1][4][2]
+_save_deal_move_143 = DEAL_TYPE_MOVES[1][4][3]
+_save_deal_move_144 = DEAL_TYPE_MOVES[1][4][4]
+'''
+
+
+
+
+def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[pyhanabi.HanabiCard]], verbose: bool = False):
     """
     Return a fabricated game state that plays as if it proceed according to state, but instead had fabricated_hand drawn.
     """
@@ -323,12 +387,83 @@ def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[py
 
     for move in state.move_history():
         if move.player() == -1:
-            fabricated_move_history.append(DEAL_TYPE_MOVES[deal_to[deck_ptr]][deck[deck_ptr][0]][deck[deck_ptr][1]])
+            print(deal_to, deck_ptr, deck)
+            fabricated_move_history.append((deal_to[deck_ptr], *deck[deck_ptr]))
             deck_ptr += 1
         else:
-            fabricated_move_history.append(move.move())
+            fabricated_move_history.append(_move_to_action_dict(move.move()))
             
+    if verbose:
+        return fabricated_move_history, deck
     return fabricated_move_history
+
+def advance_state(state, fabricated_move_history):
+    """
+    Mutate state according to fabricated move history.
+    """
+    for move in fabricated_move_history:
+        if isinstance(move, dict):
+            move = _action_dict_to_move(move)
+        if isinstance(move, pyhanabi.HanabiMove):
+            state.apply_move(move)
+        else:
+            state.deal_specific_card(*move)
+
+
+class FabricateRollout:
+    def __init__(self, state, player_id, fabricated_hand):
+        self.fabricated_move_history, self.deck = fabricate(state, player_id, fabricated_hand, verbose=True)
+        self.game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
+        self.state = self.game.new_initial_state()
+
+        # Fill in the rest of the deck with a shuffled set of remaining cards.
+        full_counts = Counter(
+            {
+                (color, rank): self.game.num_cards(color, rank)
+                for color in range(self.game.num_colors())
+                for rank in range(self.game.num_ranks())
+            }
+        )
+        used_counts = Counter(self.deck)
+
+        remaining = []
+        for card, total in full_counts.items():
+            leftover = total - used_counts[card]
+            if leftover < 0:
+                raise ValueError(f"Fabricated deals exceed deck availability for card {card}")
+            remaining.extend([card] * leftover)
+
+        expected_remaining = state.deck_size()
+        if expected_remaining and expected_remaining != len(remaining):
+            raise ValueError(f"Remaining deck size mismatch: expected {expected_remaining}, got {len(remaining)}")
+
+        random.shuffle(remaining)
+        self.remaining_deck = remaining
+        self.deck_ptr = 0
+
+        advance_state(self.state, self.fabricated_move_history)
+
+    def is_terminal(self):
+        return self.state.is_terminal()
+
+    def cur_player(self):
+        return self.state.cur_player()
+
+    def apply_move(self, move):
+        if self.state.cur_player() == pyhanabi.CHANCE_PLAYER_ID:
+            assert False, "Cannot apply non-deal move at chance node"
+
+        if move.type() == pyhanabi.HanabiMoveType.PLAY or move.type() == pyhanabi.HanabiMoveType.DISCARD:
+            self.deal_to = self.state.cur_player()
+        
+        self.state.apply_move(move)
+
+    def advance_chance_events(self):
+        while not self.state.is_terminal() and self.state.cur_player() == pyhanabi.CHANCE_PLAYER_ID and self.deck_ptr < len(self.remaining_deck):
+            next_card = self.remaining_deck[self.deck_ptr]
+            self.deck_ptr += 1
+            self.state.deal_specific_card(self.deal_to, *next_card)
+
 
 __all__ = [
     "HanabiObservation",

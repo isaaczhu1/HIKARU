@@ -12,10 +12,10 @@ rng = random.Random(42)
 
 from hanabi_gru_baseline.config import CFG as GRU_CFG
 from sparta_wrapper.belief_models import sample_world_state, _iter_all_hands, _compute_remaining_deck, _predict_partner, _hand_multiplicity, _sample_hand, _iter_all_hands
-from sparta_wrapper.hanabi_utils import build_observation, HanabiLookback1, unmask_card, fabricate
+from sparta_wrapper.hanabi_utils import build_observation, HanabiLookback1, unmask_card, fabricate, FabricateRollout
 from sparta_wrapper.hanabi_utils import HanabiObservation, _advance_chance_events, build_observation
 
-from sparta_wrapper.gru_blueprint import SamplerGRUFactoryFactory
+from sparta_wrapper.gru_blueprint import SamplerGRUFactoryFactory, FabricationPrimerFactoryFactory
 from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG, CKPT_PATH
 
 class SignalBlueprint:
@@ -108,7 +108,6 @@ def squid_game(seed):
     print("SUP", lookback1.cur_state.cur_player())
 
     obs1 = build_observation(lookback1.cur_state, 1)
-    print(obs1)
 
     print("SHIT 1")
     print(lookback1.cur_state)
@@ -125,7 +124,7 @@ def squid_game(seed):
     for hand in _iter_all_hands(player_1_obs_deck, obs1.raw_observation.card_knowledge()[0], HANABI_GAME_CONFIG["hand_size"]):
         print(hand)
     print("STOP ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp")
-    belief = (tuple(x) for x in _sample_hand(player_1_obs_deck, obs1.raw_observation.card_knowledge()[0], HANABI_GAME_CONFIG["hand_size"], rng=rng, takes=50))
+    '''belief = (tuple(x) for x in _sample_hand(player_1_obs_deck, obs1.raw_observation.card_knowledge()[0], HANABI_GAME_CONFIG["hand_size"], rng=rng, takes=50))
     frequencies = dict()
     for b in belief:
         if b not in frequencies:
@@ -157,10 +156,37 @@ def squid_game(seed):
         if move.player() == -1:
             print(unmask_card(move))
         else:
-            print(move.move().type())
+            print(move.move().type())'''
 
     fabricated_move_history = fabricate(lookback1.cur_state, 1, [(0, 2), (0, 2), (0, 0)])
     print(fabricated_move_history)
+
+    bigger_fabrication = FabricateRollout(lookback1.cur_state, 1, [(0, 2), (0, 2), (0, 0)])
+    print(bigger_fabrication.deck)
+    print(bigger_fabrication.remaining_deck)
+
+    print(bigger_fabrication.state)
+    print(bigger_fabrication.cur_player())
+
+    factory = FabricationPrimerFactoryFactory(GRU_CFG, CKPT_PATH)
+
+    actors = [factory(bigger_fabrication.fabricated_move_history, pid) for pid in range(2)]
+
+    while not bigger_fabrication.is_terminal():
+        pid = bigger_fabrication.cur_player()
+        print("it is player", pid, "turn")
+        if pid == pyhanabi.CHANCE_PLAYER_ID:
+            bigger_fabrication.advance_chance_events()
+        else:
+            obs = build_observation(bigger_fabrication.state, pid)
+            print(obs)
+            move = actors[pid].act(obs)
+            print("Player", pid, "acts:", move)
+            bigger_fabrication.apply_move(move)
+
+    print(actors)
+
+
 
 def octopus_activities(seed):
     game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
@@ -184,5 +210,15 @@ def octopus_activities(seed):
         print(move, move.player(), move.color(), move.rank(), unmask_card(move))
     pass
 
+def cheat():
+    game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
+    state = game.new_initial_state()
+    state.deal_specific_card(0, 0, 0)
+    state.deal_specific_card(0, 0, 0)
+    state.deal_specific_card(0, 0, 0)
+    state.deal_specific_card(0, 0, 1)
+    state.deal_specific_card(0, 0, 1)
+    print(state)
+
 if __name__ == "__main__":
-    squid_game(67)
+    cheat()

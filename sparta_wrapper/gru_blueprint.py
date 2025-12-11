@@ -13,10 +13,11 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from hanabi_gru_baseline.config import CFG as GRU_CFG
 from hanabi_gru_baseline.model import HanabiGRUPolicy
 from hanabi_gru_baseline.utils import load_ckpt
 
-from sparta_wrapper.hanabi_utils import fabricate, build_observation
+from sparta_wrapper.hanabi_utils import fabricate, build_observation, advance_state
 from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG, DEVICE
 
 
@@ -161,14 +162,15 @@ class NaiveGRUBlueprint:
     # Public API
     # ------------------------------------------------------------------
     @torch.no_grad()
-    def act(self, observation, *, prev_self_action=None, update_state=True):
+    def act(self, observation, *, prev_self_action=None, update_state=True, legal_moves=None):
         """Select an action for the current player given HanabiObservation."""
         obs_vec = self._encode_vectorized_observation(observation)
 
         seat = torch.tensor([[observation.current_player]], device=self.device, dtype=torch.long)
 
         # Build legal mask and map legal moves to ids
-        legal_moves = list(observation.legal_moves)
+        if legal_moves is None:
+            legal_moves = list(observation.legal_moves)
         legal_ids = [self._id_from_move(m) for m in legal_moves]
         legal_mask = torch.zeros(self.num_moves, device=self.device, dtype=torch.float32)
         for gid in legal_ids:
@@ -315,12 +317,29 @@ class MatureGRUBlueprint:
         game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
         fabricated_state = game.new_initial_state()
         for move in fabricate(state, my_id, hand_guess):
-            fabricated_state.apply_move(move)
+            advance_state(fabricated_state, [move])
             if fabricated_state.cur_player() == partner_id:
                 self.naive_blueprint.act(build_observation(fabricated_state, partner_id))
 
-    def act(self, obs: pyhanabi.HanabiObservation):
-        return self.naive_blueprint.act(obs, update_state=False)
+        self.initial_fabricated_state = fabricated_state
+
+    def prime_fabrication(self, fabricated_history, pid):
+        """
+        Prime the hidden state for inference from a fabricated move history
+        """
+        self.naive_blueprint.reset()
+
+        game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
+        fabricated_state = game.new_initial_state()
+        for move in fabricated_history:
+            advance_state(fabricated_state, [move])
+            if fabricated_state.cur_player() == pid:
+                self.naive_blueprint.act(build_observation(fabricated_state, pid))
+
+        self.initial_fabricated_state = fabricated_state
+
+    def act(self, obs: pyhanabi.HanabiObservation, legal_moves=None):
+        return self.naive_blueprint.act(obs, update_state=False, legal_moves=legal_moves)
 
 def SamplerGRUFactoryFactory(model_config, ckpt_path):
     naive_blueprint = NaiveGRUBlueprint(model_config, ckpt_path)
@@ -329,3 +348,11 @@ def SamplerGRUFactoryFactory(model_config, ckpt_path):
         primed_blueprint.prime(state, partner_id, my_id, hand_guess)
         return primed_blueprint
     return PrimedBlueprintFactory
+
+def FabricationPrimerFactoryFactory(model_config, ckpt_path):
+    naive_blueprint = NaiveGRUBlueprint(model_config, ckpt_path)
+    def FabricationPrimerFactory(fabricated_history, pid):
+        primed_blueprint = MatureGRUBlueprint(naive_blueprint)
+        primed_blueprint.prime_fabrication(fabricated_history, pid)
+        return primed_blueprint
+    return FabricationPrimerFactory
