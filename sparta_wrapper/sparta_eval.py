@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:  # pragma: no branch
     sys.path.insert(0, str(ROOT))
 
 from hanabi_gru_baseline.config import CFG as GRU_CFG
-from sparta_wrapper.hanabi_utils import _move_to_action_dict, build_observation, HanabiLookback1
+from sparta_wrapper.hanabi_utils import build_observation, HanabiLookback1, move_to_dict
 from sparta_wrapper.sparta_config import CKPT_PATH, HANABI_GAME_CONFIG, SPARTA_CONFIG
 from sparta_wrapper.sparta_search import SpartaGRUWrapper
 
@@ -75,7 +75,7 @@ def run_episode(seed: int, ckpt_path: Path, render: bool = True) -> float:
         print("Getting move...")
         move = agent.act(state, pid)
         print("Done.")
-        action_dict = _move_to_action_dict(move)
+        action_dict = move_to_dict(move)
 
         game.apply_move(move)
         state = game.cur_state

@@ -18,7 +18,7 @@ from hanabi_gru_baseline.model import HanabiGRUPolicy
 from hanabi_gru_baseline.utils import load_ckpt
 
 from sparta_wrapper.hanabi_utils import fabricate, build_observation, advance_state
-from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG, DEVICE
+from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG, DEVICE, DEBUG
 
 
 # -----------------------------------------------------------------------------
@@ -106,7 +106,8 @@ def _get_shared_model(model_config, model_ckpt_path, device: torch.device) -> _S
     )
     _MODEL_CACHE[key] = shared
 
-    print("Loaded shared model for GRU Blueprints")
+    if DEBUG:
+        print("Loaded shared model for GRU Blueprints")
     return shared
 
 

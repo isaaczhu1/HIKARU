@@ -26,9 +26,9 @@ from sparta_wrapper.hanabi_utils import (
     _card_to_dict,
     _hand_to_dict,
     _fireworks_to_dict,
-    _move_to_action_dict,
     build_observation,
     HanabiObservation,
+    move_to_dict,
 )
 from sparta_wrapper.gru_blueprint import GRU_CFG, NaiveGRUBlueprint
 
@@ -149,7 +149,7 @@ def _play_one_game(blueprint_factory: Callable[[], NaiveGRUBlueprint]) -> Dict:
         pid = state.cur_player()
         obs = build_observation(state, pid)
         action_move = blueprints[pid].act(obs)
-        action_dict = _move_to_action_dict(action_move)
+        action_dict = move_to_dict(action_move)
         # Track effects
         fireworks_before = list(state.fireworks())
         discard_before = list(state.discard_pile())

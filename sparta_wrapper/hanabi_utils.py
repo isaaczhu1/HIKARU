@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Sequence
 
 from hanabi_learning_environment import pyhanabi
-from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
+from sparta_wrapper.sparta_config import DEBUG, HANABI_GAME_CONFIG
+
+def _debug(msg: str) -> None:
+    if DEBUG:
+        print(msg)
 
 
 def _card_to_dict(card: pyhanabi.HanabiCard) -> Dict[str, Any]:
@@ -30,7 +34,7 @@ def _fireworks_to_dict(fireworks: Sequence[int]) -> Dict[str, int]:
 def _history_item_to_dict(item: pyhanabi.HanabiHistoryItem) -> Dict[str, Any]:
     payload = {
         "player": item.player(),
-        "move": _move_to_action_dict(item.move()),
+        "move": move_to_dict(item.move()),
         "scored": item.scored(),
         "information_token": item.information_token(),
         "color": pyhanabi.COLOR_CHAR[item.color()] if item.color() >= 0 else None,
@@ -54,54 +58,120 @@ def _knowledge_to_dict(
     ]
     return {"color": color, "rank": rank, "mask": mask}
 
+def _coerce_color(color: Any) -> int:
+    if isinstance(color, str):
+        return pyhanabi.color_char_to_idx(color)
+    return int(color)
 
-def _move_to_action_dict(move: pyhanabi.HanabiMove) -> Dict[str, Any]:
+
+def move_to_dict(move: pyhanabi.HanabiMove) -> Dict[str, Any]:
+    """Serialize a HanabiMove into a dict understood by rl_env and tests."""
+    if not isinstance(move, pyhanabi.HanabiMove):
+        raise TypeError(f"Expected HanabiMove, got {type(move)}")
+
     move_type = move.type()
-    payload: Dict[str, Any] = {"action_type": move_type.name}
+    payload: Dict[str, Any] = {"action_type": move_type.name, "type": move_type.name}
+
     if move_type in (pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD):
         payload["card_index"] = move.card_index()
     elif move_type == pyhanabi.HanabiMoveType.REVEAL_COLOR:
         payload["target_offset"] = move.target_offset()
-        payload["color"] = pyhanabi.COLOR_CHAR[move.color()]
+        color_idx = move.color()
+        payload["color"] = pyhanabi.COLOR_CHAR[color_idx] if color_idx >= 0 else color_idx
     elif move_type == pyhanabi.HanabiMoveType.REVEAL_RANK:
         payload["target_offset"] = move.target_offset()
         payload["rank"] = move.rank()
     elif move_type == pyhanabi.HanabiMoveType.DEAL:
         payload["target_offset"] = move.target_offset()
-        payload["color"] = pyhanabi.COLOR_CHAR[move.color()]
+        color_idx = move.color()
+        payload["color"] = pyhanabi.COLOR_CHAR[color_idx] if color_idx >= 0 else color_idx
         payload["rank"] = move.rank()
+    elif move_type == pyhanabi.HanabiMoveType.DEAL_SPECIFIC:
+        payload["card_index"] = move.card_index()
+        payload["target_offset"] = move.target_offset()
+        payload["color"] = move.color()
+        payload["rank"] = move.rank()
+    elif move_type == pyhanabi.HanabiMoveType.RETURN:
+        payload["card_index"] = move.card_index()
+        payload["target_offset"] = move.target_offset()
+    else:
+        raise ValueError(f"Unsupported move for serialization: {move_type}")
+
     return payload
 
 
-def _action_dict_to_move(data: Dict[str, Any]) -> pyhanabi.HanabiMove:
+def dict_to_move(game: pyhanabi.HanabiGame | None, spec: Dict[str, Any]) -> pyhanabi.HanabiMove:
+    """Convert an action/move dict into a fresh HanabiMove."""
+    move_type_name = spec.get("type", spec.get("action_type"))
+    if move_type_name is None:
+        raise ValueError(f"Missing move type in spec: {spec}")
     try:
-        move_type = pyhanabi.HanabiMoveType[data["action_type"].upper()]
-    except KeyError as exc:  # pragma: no cover - defensive
-        raise ValueError(f"Unknown action type: {data}") from exc
+        mtype = pyhanabi.HanabiMoveType[move_type_name.upper()]
+    except KeyError as exc:
+        raise ValueError(f"Unknown move type: {spec}") from exc
 
-    if move_type == pyhanabi.HanabiMoveType.PLAY:
-        return pyhanabi.HanabiMove.get_play_move(int(data["card_index"]))
-    if move_type == pyhanabi.HanabiMoveType.DISCARD:
-        return pyhanabi.HanabiMove.get_discard_move(int(data["card_index"]))
-    if move_type == pyhanabi.HanabiMoveType.REVEAL_COLOR:
-        color = data["color"]
-        if isinstance(color, str):
-            color_idx = pyhanabi.color_char_to_idx(color)
-        else:
-            color_idx = int(color)
-        if color_idx < 0 or color_idx >= HANABI_GAME_CONFIG["colors"]:
-            raise ValueError(f"Reveal color out of range: {color_idx}")
-        return pyhanabi.HanabiMove.get_reveal_color_move(
-            int(data["target_offset"]), color_idx
-        )
-    if move_type == pyhanabi.HanabiMoveType.REVEAL_RANK:
-        rank = int(data["rank"])
-        if rank < 0 or rank >= HANABI_GAME_CONFIG["ranks"]:
+    game = game or pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
+    num_colors = game.num_colors()
+    num_ranks = game.num_ranks()
+
+    if mtype == pyhanabi.HanabiMoveType.PLAY:
+        return pyhanabi.HanabiMove.get_play_move(spec["card_index"])
+    if mtype == pyhanabi.HanabiMoveType.DISCARD:
+        return pyhanabi.HanabiMove.get_discard_move(spec["card_index"])
+    if mtype == pyhanabi.HanabiMoveType.REVEAL_COLOR:
+        color = _coerce_color(spec["color"])
+        if color < 0 or color >= num_colors:
+            raise ValueError(f"Reveal color out of range: {color}")
+        return pyhanabi.HanabiMove.get_reveal_color_move(spec["target_offset"], color)
+    if mtype == pyhanabi.HanabiMoveType.REVEAL_RANK:
+        rank = spec["rank"]
+        if rank < 0 or rank >= num_ranks:
             raise ValueError(f"Reveal rank out of range: {rank}")
-        return pyhanabi.HanabiMove.get_reveal_rank_move(
-            int(data["target_offset"]), rank
+        return pyhanabi.HanabiMove.get_reveal_rank_move(spec["target_offset"], rank)
+    if mtype == pyhanabi.HanabiMoveType.DEAL_SPECIFIC:
+        return pyhanabi.HanabiMove.get_deal_specific_move(
+            spec.get("card_index"), spec["target_offset"], spec["color"], spec["rank"]
         )
-    raise ValueError(f"Unsupported move payload: {data}")
+    if mtype == pyhanabi.HanabiMoveType.RETURN:
+        return pyhanabi.HanabiMove.get_return_move(spec["card_index"], spec["target_offset"])
+    raise ValueError(f"Unsupported move type {move_type_name}")
+
+def _clone_move_for_state(move: Any) -> pyhanabi.HanabiMove:
+    """
+    Build a fresh HanabiMove detached from any original state.
+
+    Accepts an existing HanabiMove or a move/action dict (with type/action_type).
+    Raises on unsupported inputs.
+    """
+    if isinstance(move, pyhanabi.HanabiMove):
+        spec = move_to_dict(move)
+    elif isinstance(move, dict):
+        spec = dict(move)
+        if "type" not in spec and "action_type" in spec:
+            spec["type"] = spec["action_type"]
+    else:
+        raise ValueError(f"Unsupported move type for cloning: {move!r}")
+    return dict_to_move(None, spec)
+
+
+def apply_move_safe(state: pyhanabi.HanabiState, move: Any) -> None:
+    """
+    Apply a move to state, cloning/validating to avoid cross-state corruption.
+
+    Supports:
+      - pyhanabi.HanabiMove or action dict (applied via _clone_move_for_state)
+      - (player, color, rank) tuples/lists for DEAL events (applied via deal_specific_card)
+    """
+    if isinstance(move, (list, tuple)) and len(move) == 3 and not isinstance(move, pyhanabi.HanabiMove):
+        state.deal_specific_card(*move)
+        return
+    cloned = _clone_move_for_state(move)
+    state.apply_move(cloned)
+
+
+def apply_move_to_state(state: pyhanabi.HanabiState, move_spec: Dict[str, Any]) -> None:
+    move = _clone_move_for_state(move_spec)
+    state.apply_move(move)
 
 
 def _advance_chance_events(state: pyhanabi.HanabiState, deck_override: list[pyhanabi.HanabiCard] | None = None) -> None:
@@ -113,38 +183,6 @@ def _advance_chance_events(state: pyhanabi.HanabiState, deck_override: list[pyha
     while not state.is_terminal() and state.cur_player() == pyhanabi.CHANCE_PLAYER_ID:
         before = [[(c.color(), c.rank()) for c in hand] for hand in state.player_hands()]
         state.deal_random_card()
-        if deck_override is not None:
-            _overwrite_last_deal(state, before, deck_override)
-
-
-def _overwrite_last_deal(state: pyhanabi.HanabiState, before, deck_override: list[pyhanabi.HanabiCard]) -> None:
-    """Find the newly dealt card slot and overwrite with supplied deck order."""
-    raise NotImplementedError("_overwrite_last_deal is deprecated")
-    if not deck_override:
-        raise RuntimeError("Deck override exhausted during rollout; belief deck should cover all draws.")
-    after = [[(c.color(), c.rank()) for c in hand] for hand in state.player_hands()]
-    target = None
-    for pid, (prev, curr) in enumerate(zip(before, after)):
-        if len(prev) != len(curr):  # safety: unlikely in standard Hanabi after initial deal
-            idx = len(curr) - 1
-            target = (pid, idx)
-            break
-        for idx, (p, q) in enumerate(zip(prev, curr)):
-            if p != q:
-                target = (pid, idx)
-                break
-        if target:
-            break
-    if target is None:
-        # Fallback: nothing changed; drop a card from override to keep alignment
-        deck_override.pop(0)
-        return
-    pid, idx = target
-    try:
-        card = deck_override.pop(0)
-    except IndexError:
-        return
-    state.player_hands()[pid][idx] = card
 
 @dataclass
 class HanabiObservation:
@@ -196,7 +234,7 @@ def build_observation(state: pyhanabi.HanabiState, player_id: int) -> HanabiObse
         life_tokens=obs.life_tokens(),
         raw_observation=obs,
         legal_moves=legal_moves,
-        legal_moves_dict=[_move_to_action_dict(move) for move in legal_moves],
+        legal_moves_dict=[move_to_dict(move) for move in legal_moves],
         last_moves=last_moves,
     )
 
@@ -217,6 +255,13 @@ class HanabiLookback1:
         # move buffer
         self.last_move = None
 
+    def _clone_move(self, move):
+        """
+        Rebuild a move object from a dict or HanabiMove to avoid reusing
+        C++ objects tied to a different game/state.
+        """
+        return _clone_move_for_state(move)
+
     def apply_move(self, move):
         # if no previous state, init it
         if self.prev_state is None:
@@ -225,11 +270,13 @@ class HanabiLookback1:
             _advance_chance_events(self.prev_state)
 
         # cum
-        self.cur_state.apply_move(move)
+        move_to_apply = self._clone_move(move)
+        apply_move_safe(self.cur_state, move_to_apply)
         _advance_chance_events(self.cur_state)
 
         if self.last_move:
-            self.prev_state.apply_move(self.last_move)
+            prev_move = self._clone_move(self.last_move)
+            apply_move_safe(self.prev_state, prev_move)
             _advance_chance_events(self.prev_state)
 
         # print("===== applied move =====")
@@ -238,7 +285,7 @@ class HanabiLookback1:
         # print("Previous player:", self.prev_state.cur_player())
         # print("=========================")
 
-        self.last_move = move
+        self.last_move = move_to_dict(move_to_apply)
         
 def unmask_card(move):
     """
@@ -288,7 +335,8 @@ while needed > 0:
                 DEAL_TYPE_MOVES[player][color][rank] = move.move()
                 needed -= 1
 
-print(DEAL_TYPE_MOVES)
+if DEBUG:
+    print(DEAL_TYPE_MOVES)
 
 '''
 _save_game = game
@@ -349,17 +397,15 @@ _save_deal_move_144 = DEAL_TYPE_MOVES[1][4][4]
 
 def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[pyhanabi.HanabiCard]], verbose: bool = False):
     """
-    Return a fabricated game state that plays as if it proceed according to state, but instead had fabricated_hand drawn.
+    Return a fabricated game history that plays as if it proceed according to state, but instead had fabricated_hand drawn.
     """
     
     # Step 1: determine dealing order
-
     deck_idx = 0
     num_players, hand_size = HANABI_GAME_CONFIG["players"], HANABI_GAME_CONFIG["hand_size"]
     initial_deal_length = num_players * hand_size
-
     deal_to = []
-    rcv = [[] for _ in range(num_players)]
+    deck_tracking = [[] for _ in range(num_players)]
     last_acting_player = -1
 
     deck = []
@@ -371,15 +417,17 @@ def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[py
             elif last_acting_player != -1:
                 deal_to.append(last_acting_player)
 
-            rcv[deal_to[-1]].append(deck_idx)
+            deck_tracking[deal_to[-1]].append(deck_idx)
             deck.append(unmask_card(move))
             deck_idx += 1
 
         elif move.move().type() in [pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD]:
             last_acting_player = move.player()
+            position = move.move().card_index()
+            deck_tracking[last_acting_player].pop(last_acting_player)
 
     # Step 2: fabricate!
-    for pos, card in zip(rcv[player_id][-hand_size:], fabricated_hand):
+    for pos, card in zip(deck_tracking[player_id], fabricated_hand):
         deck[pos] = card
 
     fabricated_move_history = []
@@ -387,11 +435,10 @@ def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[py
 
     for move in state.move_history():
         if move.player() == -1:
-            print(deal_to, deck_ptr, deck)
             fabricated_move_history.append((deal_to[deck_ptr], *deck[deck_ptr]))
             deck_ptr += 1
         else:
-            fabricated_move_history.append(_move_to_action_dict(move.move()))
+            fabricated_move_history.append(move_to_dict(move.move()))
             
     if verbose:
         return fabricated_move_history, deck
@@ -402,12 +449,7 @@ def advance_state(state, fabricated_move_history):
     Mutate state according to fabricated move history.
     """
     for move in fabricated_move_history:
-        if isinstance(move, dict):
-            move = _action_dict_to_move(move)
-        if isinstance(move, pyhanabi.HanabiMove):
-            state.apply_move(move)
-        else:
-            state.deal_specific_card(*move)
+        apply_move_safe(state, move)
 
 
 class FabricateRollout:
@@ -440,6 +482,7 @@ class FabricateRollout:
         random.shuffle(remaining)
         self.remaining_deck = remaining
         self.deck_ptr = 0
+        self.deal_to = None
 
         advance_state(self.state, self.fabricated_move_history)
 
@@ -453,10 +496,14 @@ class FabricateRollout:
         if self.state.cur_player() == pyhanabi.CHANCE_PLAYER_ID:
             assert False, "Cannot apply non-deal move at chance node"
 
-        if move.type() == pyhanabi.HanabiMoveType.PLAY or move.type() == pyhanabi.HanabiMoveType.DISCARD:
+        move_obj = move
+        if not isinstance(move_obj, pyhanabi.HanabiMove):
+            move_obj = _clone_move_for_state(move_obj)
+
+        if move_obj.type() in (pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD):
             self.deal_to = self.state.cur_player()
         
-        self.state.apply_move(move)
+        apply_move_safe(self.state, move_obj)
 
     def advance_chance_events(self):
         while not self.state.is_terminal() and self.state.cur_player() == pyhanabi.CHANCE_PLAYER_ID and self.deck_ptr < len(self.remaining_deck):
@@ -470,8 +517,11 @@ __all__ = [
     "HanabiLookback1",
     "build_observation",
     "_advance_chance_events",
-    "_move_to_action_dict",
-    "_action_dict_to_move",
+    "_clone_move_for_state",
+    "move_to_dict",
+    "dict_to_move",
+    "apply_move_to_state",
+    "apply_move_safe",
     "unmask_card",
     "fabricate"
 ]
