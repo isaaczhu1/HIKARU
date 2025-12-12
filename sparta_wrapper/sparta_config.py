@@ -22,4 +22,4 @@ SPARTA_CONFIG = {
 }
 
 # Enable noisy debug prints when True.
-DEBUG = True
+DEBUG = False
