@@ -1,4 +1,3 @@
-*.pt
 hanabi_gru_baseline/isaac_trash/
 hanabi_gru_baseline/__pycache__/
 *__pycache__/
