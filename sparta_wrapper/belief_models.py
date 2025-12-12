@@ -83,6 +83,13 @@ def _hand_multiplicity(remaining_deck, hand):
 def _sample_hand(remaining_deck, knowledge, hand_size, rng, takes):
     """Approximate sampling of a plausible hand via per-slot marginal draws."""
 
+    def _card_allowed(slot_knowledge, card):
+        color, rank = card
+        # card_plausible accounts for non-factorizable hint masks; fall back to color/rank if absent.
+        if hasattr(slot_knowledge, "card_plausible"):
+            return slot_knowledge.card_plausible(color, rank)
+        return slot_knowledge.color_plausible(color) and slot_knowledge.rank_plausible(rank)
+
     def _sample_single():
         deck_counts = dict(remaining_deck)
         hand = []
@@ -91,7 +98,7 @@ def _sample_hand(remaining_deck, knowledge, hand_size, rng, takes):
             candidates = [
                 (card, ct)
                 for card, ct in deck_counts.items()
-                if ct > 0 and slot_knowledge.color_plausible(card[0]) and slot_knowledge.rank_plausible(card[1])
+                if ct > 0 and _card_allowed(slot_knowledge, card)
             ]
             if not candidates:
                 return None
