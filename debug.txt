@@ -105,3 +105,210 @@ Discard: G5 G2 G4 Y4 B5 W1
 P0 hand: 0:W2 1:W1 2:G1 3:B1 4:Y3
 P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y3
 Getting move...
+Done.
+
+--- Turn 12 | Player 1 plays REVEAL_COLOR color=W ---
+Score: 1 | Deck: 33 | Info: 7 | Lives: 1
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1
+P0 hand: 0:W2 1:W1 2:G1 3:B1 4:Y3
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y3
+Getting move...
+Done.
+
+--- Turn 13 | Player 0 plays PLAY idx=2 ---
+Score: 2 | Deck: 32 | Info: 7 | Lives: 1
+Fireworks: R:0 Y:0 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1
+P0 hand: 0:W2 1:W1 2:B1 3:Y3 4:W4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y3
+Getting move...
+Done.
+
+--- Turn 14 | Player 1 plays REVEAL_RANK rank=3 ---
+Score: 2 | Deck: 32 | Info: 6 | Lives: 1
+Fireworks: R:0 Y:0 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1
+P0 hand: 0:W2 1:W1 2:B1 3:Y3 4:W4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y3
+Getting move...
+Done.
+
+--- Turn 15 | Player 0 plays REVEAL_RANK rank=1 ---
+Score: 2 | Deck: 32 | Info: 5 | Lives: 1
+Fireworks: R:0 Y:0 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1
+P0 hand: 0:W2 1:W1 2:B1 3:Y3 4:W4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y3
+Getting move...
+Done.
+
+--- Turn 16 | Player 1 plays REVEAL_COLOR color=B ---
+Score: 2 | Deck: 32 | Info: 4 | Lives: 1
+Fireworks: R:0 Y:0 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1
+P0 hand: 0:W2 1:W1 2:B1 3:Y3 4:W4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y3
+Getting move...
+Done.
+
+--- Turn 17 | Player 0 plays REVEAL_COLOR color=Y ---
+Score: 2 | Deck: 32 | Info: 3 | Lives: 1
+Fireworks: R:0 Y:0 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1
+P0 hand: 0:W2 1:W1 2:B1 3:Y3 4:W4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y3
+Getting move...
+Done.
+
+--- Turn 18 | Player 1 plays PLAY idx=3 ---
+Score: 3 | Deck: 31 | Info: 3 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1
+P0 hand: 0:W2 1:W1 2:B1 3:Y3 4:W4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y3 4:R3
+Getting move...
+Done.
+
+--- Turn 19 | Player 0 plays DISCARD idx=2 ---
+Score: 3 | Deck: 30 | Info: 4 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1
+P0 hand: 0:W2 1:W1 2:Y3 3:W4 4:W2
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y3 4:R3
+Getting move...
+Done.
+
+--- Turn 20 | Player 1 plays DISCARD idx=4 ---
+Score: 3 | Deck: 29 | Info: 5 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3
+P0 hand: 0:W2 1:W1 2:Y3 3:W4 4:W2
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y3 4:G2
+Getting move...
+Done.
+
+--- Turn 21 | Player 0 plays DISCARD idx=0 ---
+Score: 3 | Deck: 28 | Info: 6 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2
+P0 hand: 0:W1 1:Y3 2:W4 3:W2 4:B4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y3 4:G2
+Getting move...
+Done.
+
+--- Turn 22 | Player 1 plays REVEAL_RANK rank=1 ---
+Score: 3 | Deck: 28 | Info: 5 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2
+P0 hand: 0:W1 1:Y3 2:W4 3:W2 4:B4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y3 4:G2
+Getting move...
+Done.
+
+--- Turn 23 | Player 0 plays REVEAL_RANK rank=0 ---
+Score: 3 | Deck: 28 | Info: 4 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2
+P0 hand: 0:W1 1:Y3 2:W4 3:W2 4:B4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y3 4:G2
+Getting move...
+Done.
+
+--- Turn 24 | Player 1 plays REVEAL_COLOR color=B ---
+Score: 3 | Deck: 28 | Info: 3 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2
+P0 hand: 0:W1 1:Y3 2:W4 3:W2 4:B4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y3 4:G2
+Getting move...
+Done.
+
+--- Turn 25 | Player 0 plays REVEAL_RANK rank=2 ---
+Score: 3 | Deck: 28 | Info: 2 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2
+P0 hand: 0:W1 1:Y3 2:W4 3:W2 4:B4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y3 4:G2
+Getting move...
+Done.
+
+--- Turn 26 | Player 1 plays DISCARD idx=3 ---
+Score: 3 | Deck: 27 | Info: 3 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2 Y3
+P0 hand: 0:W1 1:Y3 2:W4 3:W2 4:B4
+P1 hand: 0:Y4 1:Y2 2:R1 3:G2 4:G3
+Getting move...
+Done.
+
+--- Turn 27 | Player 0 plays REVEAL_COLOR color=G ---
+Score: 3 | Deck: 27 | Info: 2 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2 Y3
+P0 hand: 0:W1 1:Y3 2:W4 3:W2 4:B4
+P1 hand: 0:Y4 1:Y2 2:R1 3:G2 4:G3
+Getting move...
+Done.
+
+--- Turn 28 | Player 1 plays DISCARD idx=1 ---
+Score: 3 | Deck: 26 | Info: 3 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2 Y3 Y2
+P0 hand: 0:W1 1:Y3 2:W4 3:W2 4:B4
+P1 hand: 0:Y4 1:R1 2:G2 3:G3 4:B2
+Getting move...
+Done.
+
+--- Turn 29 | Player 0 plays REVEAL_COLOR color=B ---
+Score: 3 | Deck: 26 | Info: 2 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2 Y3 Y2
+P0 hand: 0:W1 1:Y3 2:W4 3:W2 4:B4
+P1 hand: 0:Y4 1:R1 2:G2 3:G3 4:B2
+Getting move...
+Done.
+
+--- Turn 30 | Player 1 plays REVEAL_RANK rank=2 ---
+Score: 3 | Deck: 26 | Info: 1 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2 Y3 Y2
+P0 hand: 0:W1 1:Y3 2:W4 3:W2 4:B4
+P1 hand: 0:Y4 1:R1 2:G2 3:G3 4:B2
+Getting move...
+Done.
+
+--- Turn 31 | Player 0 plays DISCARD idx=0 ---
+Score: 3 | Deck: 25 | Info: 2 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2 Y3 Y2 W1
+P0 hand: 0:Y3 1:W4 2:W2 3:B4 4:B2
+P1 hand: 0:Y4 1:R1 2:G2 3:G3 4:B2
+Getting move...
+Done.
+
+--- Turn 32 | Player 1 plays REVEAL_RANK rank=3 ---
+Score: 3 | Deck: 25 | Info: 1 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2 Y3 Y2 W1
+P0 hand: 0:Y3 1:W4 2:W2 3:B4 4:B2
+P1 hand: 0:Y4 1:R1 2:G2 3:G3 4:B2
+Getting move...
+Done.
+
+--- Turn 33 | Player 0 plays DISCARD idx=3 ---
+Score: 3 | Deck: 24 | Info: 2 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2 Y3 Y2 W1 B4
+P0 hand: 0:Y3 1:W4 2:W2 3:B2 4:G3
+P1 hand: 0:Y4 1:R1 2:G2 3:G3 4:B2
+Getting move...
+Done.
+
+--- Turn 34 | Player 1 plays REVEAL_COLOR color=W ---
+Score: 3 | Deck: 24 | Info: 1 | Lives: 1
+Fireworks: R:0 Y:1 G:1 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1 B1 R3 W2 Y3 Y2 W1 B4
+P0 hand: 0:Y3 1:W4 2:W2 3:B2 4:G3
+P1 hand: 0:Y4 1:R1 2:G2 3:G3 4:B2
+Getting move...

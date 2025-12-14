@@ -163,7 +163,7 @@ class NaiveGRUBlueprint:
     # Public API
     # ------------------------------------------------------------------
     @torch.no_grad()
-    def act(self, observation, *, prev_self_action=None, update_state=True, legal_moves=None):
+    def logits(self, observation, prev_self_action=None, update_state=True, legal_moves=None):
         """Select an action for the current player given HanabiObservation."""
         obs_vec = self._encode_vectorized_observation(observation)
 
@@ -205,6 +205,12 @@ class NaiveGRUBlueprint:
         # Mask illegal actions
         very_neg = torch.finfo(logits.dtype).min
         masked = logits.masked_fill(legal_mask.squeeze(0) < 0.5, very_neg)
+        return masked, legal_moves
+
+    @torch.no_grad()
+    def act(self, observation, *, prev_self_action=None, update_state=True, legal_moves=None):
+        """Select an action for the current player given HanabiObservation."""
+        masked, legal_moves = self.logits(observation, prev_self_action=prev_self_action, update_state=update_state, legal_moves=legal_moves)
         dist = torch.distributions.Categorical(logits=masked)
         action_id = int(dist.sample().item())
 

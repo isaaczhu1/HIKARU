@@ -1,4 +1,4 @@
-"""Run a single SPARTA-vs-SPARTA Hanabi game and log moves to stdout."""
+"""Run a single SPARTA Hanabi game and log moves to stdout."""
 
 from __future__ import annotations
 

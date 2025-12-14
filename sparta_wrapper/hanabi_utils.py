@@ -470,34 +470,37 @@ def advance_state(state, fabricated_move_history):
 
 
 class FabricateRollout:
-    def __init__(self, state, player_id, fabricated_hand):
+    def __init__(self, state, player_id, fabricated_hand, remaining_deck=None):
         self.fabricated_move_history, self.deck = fabricate(state, player_id, fabricated_hand, verbose=True)
         self.game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
         self.state = self.game.new_initial_state()
 
-        # Fill in the rest of the deck with a shuffled set of remaining cards.
-        full_counts = Counter(
-            {
-                (color, rank): self.game.num_cards(color, rank)
-                for color in range(self.game.num_colors())
-                for rank in range(self.game.num_ranks())
-            }
-        )
-        used_counts = Counter(self.deck)
+        if remaining_deck is None:
+            # Fill in the rest of the deck with a shuffled set of remaining cards.
+            full_counts = Counter(
+                {
+                    (color, rank): self.game.num_cards(color, rank)
+                    for color in range(self.game.num_colors())
+                    for rank in range(self.game.num_ranks())
+                }
+            )
+            used_counts = Counter(self.deck)
 
-        remaining = []
-        for card, total in full_counts.items():
-            leftover = total - used_counts[card]
-            if leftover < 0:
-                raise ValueError(f"Fabricated deals exceed deck availability for card {card}")
-            remaining.extend([card] * leftover)
+            remaining = []
+            for card, total in full_counts.items():
+                leftover = total - used_counts[card]
+                if leftover < 0:
+                    raise ValueError(f"Fabricated deals exceed deck availability for card {card}")
+                remaining.extend([card] * leftover)
 
-        expected_remaining = state.deck_size()
-        if expected_remaining and expected_remaining != len(remaining):
-            raise ValueError(f"Remaining deck size mismatch: expected {expected_remaining}, got {len(remaining)}")
+            expected_remaining = state.deck_size()
+            if expected_remaining and expected_remaining != len(remaining):
+                raise ValueError(f"Remaining deck size mismatch: expected {expected_remaining}, got {len(remaining)}")
 
-        random.shuffle(remaining)
-        self.remaining_deck = remaining
+            random.shuffle(remaining)
+            self.remaining_deck = remaining
+        else:
+            self.remaining_deck = remaining_deck
         self.deck_ptr = 0
         self.deal_to = None
 

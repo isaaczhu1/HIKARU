@@ -20,6 +20,7 @@ from sparta_wrapper.gru_blueprint import (
     SamplerGRUFactoryFactory,
 )
 from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG, DEBUG
+import torch
 
 class SpartaGRUWrapper:
     def __init__(self, ckpt_path, model_config, sparta_config, game: HanabiLookback1):
@@ -37,24 +38,57 @@ class SpartaGRUWrapper:
 
         # Baseline blueprint action.
         blueprint = NaiveGRUBlueprint(self.model_config, self.ckpt_path)
-        blueprint_move = blueprint.act(obs)
+        blueprint_logits, _ = blueprint.logits(obs)
+        blueprint_logits = torch.squeeze(blueprint_logits)
 
+        dist = torch.distributions.Categorical(logits=blueprint_logits)
+
+        blueprint_move = int(dist.sample())
+        search_moves = []
+
+        to_mask = blueprint_move
+        very_neg = torch.finfo(blueprint_logits.dtype).min
+        for _ in range(self.sparta_config["search_width"]):
+
+            blueprint_logits[to_mask] = very_neg
+            dist = torch.distributions.Categorical(logits=blueprint_logits)
+            to_mask = int(dist.sample())
+
+            search_moves.append(to_mask)
+
+        obs = build_observation(state, player_id)
+
+        samples = sample_world_state(
+            lagging_state=self.game.prev_state,
+            obs=obs,
+            rng=self.rng,
+            blueprint_factory=self.blueprint_factory,
+            takes=self.sparta_config["num_rollouts"],
+            upstream_factor=self.sparta_config["upstream_factor"],
+            max_attempts=self.sparta_config["max_attempts"],
+        )
+
+        fabricate_tocopy = [FabricateRollout(state, player_id, sample) for sample in samples]
         values = {}
-        for move in legal_moves:
-            values[move] = self._estimate_value(state, player_id, move)
+        for move in [blueprint_move] + search_moves:
+            values[move] = self._estimate_value(
+                obs=obs,
+                rollouts=[FabricateRollout(state, player_id, sample, rollout.remaining_deck) for sample, rollout in zip(samples, fabricate_tocopy)],
+                state=state,
+                player_id=player_id,
+                action=blueprint._move_from_id(move, obs.legal_moves)
+            )
 
-        # Choose best Monte Carlo value.
-        best_move = max(values, key=values.get)
-        best_val = values[best_move]
-        bp_val = values.get(blueprint_move)
-        if bp_val is None:
-            bp_val = self._estimate_value(state, player_id, blueprint_move)
+        # boost blueprint move
+        values[blueprint_move] += self.sparta_config["epsilon"]
 
-        if best_val - bp_val < self.sparta_config["epsilon"]:
-            return blueprint_move
-        return best_move
+        for move, value in values.items():
+            print(blueprint._move_from_id(move, obs.legal_moves), value)
 
-    def _estimate_value(self, state, player_id, action):
+        # greedy
+        return blueprint._move_from_id(max(values, key=values.get), obs.legal_moves)
+
+    def _estimate_value(self, obs, rollouts, state, player_id, action):
         """
         Monte Carlo estimate of Q(state, action) under the blueprint after the first ply.
 
@@ -65,32 +99,19 @@ class SpartaGRUWrapper:
           3) Apply the candidate action for player_id.        # pseudocode placeholder
           4) Roll forward with blueprint actions until terminal; record final score.  # pseudocode placeholder
         """
-        if DEBUG:
-            _debug(f"Called _estimate_value with params  {state} {player_id} {action}")
-        obs = build_observation(state, player_id)
-        values: List[float] = []
-        if DEBUG:
-            _debug("Collecting samples...")
-        samples = sample_world_state(
-            lagging_state=self.game.prev_state,
-            obs=obs,
-            rng=self.rng,
-            blueprint_factory=self.blueprint_factory,
-            takes=self.sparta_config["num_rollouts"],
-            upstream_factor=self.sparta_config["upstream_factor"],
-            max_attempts=self.sparta_config["max_attempts"],
-        )
+
         if DEBUG:
             _debug("Done with samples, priming factory...")
         primer_factory = FabricationPrimerFactoryFactory(self.model_config, self.ckpt_path)
         if DEBUG:
             _debug("Iterating hands...")
             _debug(str(state))
-        from tqdm import tqdm
 
-        for hand_guess in tqdm(samples):
-            _debug(f"Shit {hand_guess} {player_id}")
-            fabrication = FabricateRollout(state, player_id, hand_guess)
+        values = []
+
+        from tqdm import tqdm
+        for fabrication in tqdm(rollouts):
+            _debug(f"Shit {fabrication} {player_id}")
             _debug("Done fabricating...")
             actors = [
                 primer_factory(fabrication.fabricated_move_history, pid)
@@ -107,6 +128,8 @@ class SpartaGRUWrapper:
             _debug("stabilizing outputs...")
             # import time
             # time.sleep(0.1)
+
+            this_score = 0
 
 
             while not fabrication.is_terminal():
@@ -128,8 +151,9 @@ class SpartaGRUWrapper:
                 _debug(f"actor wants {move}")
                 fabrication.apply_move(move)
                 fabrication.advance_chance_events()
+                this_score = max(this_score, fabrication.state.score())
 
-            values.append(float(fabrication.state.score()))
+            values.append(float(this_score))
 
         return sum(values) / len(values) if values else 0.0
 

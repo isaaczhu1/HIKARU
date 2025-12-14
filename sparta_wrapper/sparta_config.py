@@ -12,9 +12,12 @@ DEVICE = "cuda"
 CKPT_PATH = "runs/hanabi/standard_train/20251210_000611/ckpt_001000.pt"
 
 SPARTA_CONFIG = {
-    "num_rollouts": 4,
+    "num_rollouts": 16,
     "epsilon": 0.05,
-    "rng_seed": None,
+    "rng_seed": 0,
+
+    # number of moves to look at 
+    "search_width": 3,
 
     # for rejection sampling
     "upstream_factor": 5,
