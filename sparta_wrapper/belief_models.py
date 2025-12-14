@@ -15,6 +15,7 @@ from sparta_wrapper.hanabi_utils import (
     build_observation,
     dict_to_move,
     move_to_dict,
+    _reprhand
 )
 from sparta_wrapper.sparta_config import DEBUG
 
@@ -244,6 +245,12 @@ def sample_world_state(
 
     samples = []
 
+    _debug(("Sampling world state."))
+    _debug(("Lagging_state:", lagging_state))
+    _debug(("Obs", obs))
+    _debug(("rng", rng))
+    _debug((takes, upstream_factor, max_attempts))
+
     it = 0
     while len(samples) < takes:
         _debug(f"Try {it}")
@@ -255,12 +262,15 @@ def sample_world_state(
             )
             fill_hands = _sample_hand(remaining_deck, knowledge, HANABI_GAME_CONFIG["hand_size"], rng, takes - len(samples))
             samples.extend(fill_hands)
+            _debug(("Filled hands", [_reprhand(hand) for hand in fill_hands]))
             break
             
         upstream_takes = (takes - len(samples)) * upstream_factor
         _debug("Starting squid game....")
         candidate_hands = _sample_hand(remaining_deck, knowledge, HANABI_GAME_CONFIG["hand_size"], rng, upstream_takes)
         _debug(str(candidate_hands))
+
+        _debug(("Candidate hands are", [_reprhand(hand) for hand in candidate_hands]))
 
         for hand in candidate_hands:
             _debug(f"4head {[f'{pyhanabi.COLOR_CHAR[c]}{r + 1}' for c, r in hand]}")

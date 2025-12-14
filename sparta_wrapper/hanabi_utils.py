@@ -15,6 +15,15 @@ def _debug(msg: str) -> None:
     if DEBUG:
         print(msg, flush=True)
 
+def _reprcard(card):
+    if isinstance(card, pyhanabi.HanabiCard):
+        return pyhanabi.COLOR_CHAR[card.color()] + str(card.rank() + 1)
+    else:
+        return pyhanabi.COLOR_CHAR[card[0]] + str(card[1] + 1)
+
+def _reprhand(hand):
+    return [_reprcard(card) for card in hand]
+
 
 def _card_to_dict(card: pyhanabi.HanabiCard) -> Dict[str, Any]:
     return {
@@ -429,7 +438,7 @@ def fabricate(state: pyhanabi.HanabiState, player_id: int, fabricated_hand: [[py
         elif move.move().type() in [pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD]:
             last_acting_player = move.player()
             position = move.move().card_index()
-            deck_tracking[last_acting_player].pop(last_acting_player)
+            deck_tracking[last_acting_player].pop(position)
     _debug(f"{deck_tracking} {deal_to}")
 
     # Step 2: fabricate!

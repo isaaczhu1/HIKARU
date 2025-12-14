@@ -1,0 +1,107 @@
+
+=== New Game ===
+Score: 0 | Deck: 40 | Info: 8 | Lives: 3
+Fireworks: R:0 Y:0 G:0 B:0 W:0
+Discard: -
+P0 hand: 0:G5 1:W1 2:W2 3:W1 4:G4
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:G2
+Getting move...
+Done.
+
+--- Turn 1 | Player 0 plays PLAY idx=1 ---
+Score: 1 | Deck: 39 | Info: 8 | Lives: 3
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: -
+P0 hand: 0:G5 1:W2 2:W1 3:G4 4:B5
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:G2
+Getting move...
+Done.
+
+--- Turn 2 | Player 1 plays REVEAL_RANK rank=0 ---
+Score: 1 | Deck: 39 | Info: 7 | Lives: 3
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: -
+P0 hand: 0:G5 1:W2 2:W1 3:G4 4:B5
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:G2
+Getting move...
+Done.
+
+--- Turn 3 | Player 0 plays PLAY idx=0 ---
+Score: 1 | Deck: 38 | Info: 7 | Lives: 2
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: G5
+P0 hand: 0:W2 1:W1 2:G4 3:B5 4:G1
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:G2
+Getting move...
+Done.
+
+--- Turn 4 | Player 1 plays DISCARD idx=4 ---
+Score: 1 | Deck: 37 | Info: 8 | Lives: 2
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: G5 G2
+P0 hand: 0:W2 1:W1 2:G4 3:B5 4:G1
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y4
+Getting move...
+Done.
+
+--- Turn 5 | Player 0 plays PLAY idx=2 ---
+Score: 1 | Deck: 36 | Info: 8 | Lives: 1
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: G5 G2 G4
+P0 hand: 0:W2 1:W1 2:B5 3:G1 4:W1
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y4
+Getting move...
+Done.
+
+--- Turn 6 | Player 1 plays REVEAL_COLOR color=B ---
+Score: 1 | Deck: 36 | Info: 7 | Lives: 1
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: G5 G2 G4
+P0 hand: 0:W2 1:W1 2:B5 3:G1 4:W1
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y4
+Getting move...
+Done.
+
+--- Turn 7 | Player 0 plays REVEAL_RANK rank=3 ---
+Score: 1 | Deck: 36 | Info: 6 | Lives: 1
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: G5 G2 G4
+P0 hand: 0:W2 1:W1 2:B5 3:G1 4:W1
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y4
+Getting move...
+Done.
+
+--- Turn 8 | Player 1 plays DISCARD idx=4 ---
+Score: 1 | Deck: 35 | Info: 7 | Lives: 1
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: G5 G2 G4 Y4
+P0 hand: 0:W2 1:W1 2:B5 3:G1 4:W1
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y3
+Getting move...
+Done.
+
+--- Turn 9 | Player 0 plays DISCARD idx=2 ---
+Score: 1 | Deck: 34 | Info: 8 | Lives: 1
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: G5 G2 G4 Y4 B5
+P0 hand: 0:W2 1:W1 2:G1 3:W1 4:B1
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y3
+Getting move...
+Done.
+
+--- Turn 10 | Player 1 plays REVEAL_RANK rank=0 ---
+Score: 1 | Deck: 34 | Info: 7 | Lives: 1
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: G5 G2 G4 Y4 B5
+P0 hand: 0:W2 1:W1 2:G1 3:W1 4:B1
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y3
+Getting move...
+Done.
+
+--- Turn 11 | Player 0 plays DISCARD idx=3 ---
+Score: 1 | Deck: 33 | Info: 8 | Lives: 1
+Fireworks: R:0 Y:0 G:0 B:0 W:1
+Discard: G5 G2 G4 Y4 B5 W1
+P0 hand: 0:W2 1:W1 2:G1 3:B1 4:Y3
+P1 hand: 0:Y4 1:Y2 2:R1 3:Y1 4:Y3
+Getting move...
