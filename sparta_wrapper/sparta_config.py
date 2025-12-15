@@ -9,7 +9,7 @@ HANABI_GAME_CONFIG = {
 
 DEVICE = "cuda"
 
-CKPT_PATH = "runs/hanabi/standard_train/20251210_000611/ckpt_001000.pt"
+CKPT_PATH = "gru_checkpoints/ckpt_020000.pt"
 
 SPARTA_CONFIG = {
     "num_rollouts": 16,

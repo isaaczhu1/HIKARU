@@ -326,9 +326,9 @@ class MatureGRUBlueprint:
         fabricated_state = game.new_initial_state()
         for move in fabricate(state, my_id, hand_guess):
             _debug(f"To fabricate: {move} {fabricated_state.cur_player()}")
-            advance_state(fabricated_state, [move])
             if fabricated_state.cur_player() == partner_id:
                 self.naive_blueprint.act(build_observation(fabricated_state, partner_id))
+            advance_state(fabricated_state, [move])
             _debug(f"{fabricated_state} {fabricated_state.cur_player()}")
 
         self.initial_fabricated_state = fabricated_state
@@ -341,15 +341,16 @@ class MatureGRUBlueprint:
 
         game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
         fabricated_state = game.new_initial_state()
+        
         for move in fabricated_history:
-            advance_state(fabricated_state, [move])
             if fabricated_state.cur_player() == pid:
-                self.naive_blueprint.act(build_observation(fabricated_state, pid))
+                self.naive_blueprint.act(build_observation(fabricated_state, pid), update_state=True)
+            advance_state(fabricated_state, [move])
 
         self.initial_fabricated_state = fabricated_state
 
-    def act(self, obs: pyhanabi.HanabiObservation, legal_moves=None):
-        return self.naive_blueprint.act(obs, update_state=False, legal_moves=legal_moves)
+    def act(self, obs: pyhanabi.HanabiObservation, update_state=False, legal_moves=None):
+        return self.naive_blueprint.act(obs, update_state=update_state, legal_moves=legal_moves)
 
 def SamplerGRUFactoryFactory(model_config, ckpt_path):
     def PrimedBlueprintFactory(state: pyhanabi.HanabiState, partner_id: int, my_id: int, hand_guess):
