@@ -120,6 +120,7 @@ class SpartaGRUWrapper:
             _debug("Primed factories...")
 
             # Apply the candidate action from the root player, then proceed with chance draws.
+            this_score = fabrication.state.score()
             fabrication.apply_move(action)
             fabrication.advance_chance_events()
 
@@ -129,7 +130,7 @@ class SpartaGRUWrapper:
             # import time
             # time.sleep(0.1)
 
-            this_score = 0
+            this_score = fabrication.state.score()
 
 
             while not fabrication.is_terminal():
@@ -154,6 +155,7 @@ class SpartaGRUWrapper:
                 this_score = max(this_score, fabrication.state.score())
 
             values.append(float(this_score))
+            assert this_score >= state.score()
 
         return sum(values) / len(values) if values else 0.0
 
