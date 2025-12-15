@@ -38,7 +38,7 @@ class SpartaGRUWrapper:
 
         # Baseline blueprint action.
         blueprint = NaiveGRUBlueprint(self.model_config, self.ckpt_path)
-        blueprint_logits, _ = blueprint.logits(obs)
+        blueprint_logits, _ = blueprint.logits(obs, update_state=True)
         blueprint_logits = torch.squeeze(blueprint_logits)
 
         dist = torch.distributions.Categorical(logits=blueprint_logits)

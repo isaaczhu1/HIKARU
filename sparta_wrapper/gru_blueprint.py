@@ -349,7 +349,7 @@ class MatureGRUBlueprint:
 
         self.initial_fabricated_state = fabricated_state
 
-    def act(self, obs: pyhanabi.HanabiObservation, update_state=False, legal_moves=None):
+    def act(self, obs: pyhanabi.HanabiObservation, update_state=True, legal_moves=None):
         return self.naive_blueprint.act(obs, update_state=update_state, legal_moves=legal_moves)
 
 def SamplerGRUFactoryFactory(model_config, ckpt_path):
