@@ -20,7 +20,8 @@ SPARTA_CONFIG = {
     "search_width": 3,
 
     # for rejection sampling
-    "max_attempts": 100,
+    "upstream_factor": 5,
+    "max_attempts": 5,
 }
 
 # Enable noisy debug prints when True.

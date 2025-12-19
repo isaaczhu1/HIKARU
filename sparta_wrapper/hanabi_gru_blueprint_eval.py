@@ -7,7 +7,9 @@ from pathlib import Path
 import sys
 from typing import Callable, List
 
+print("importing torch")
 import torch
+print("imported torch")
 from hanabi_learning_environment import rl_env
 from hanabi_learning_environment import pyhanabi
 from torch.utils.tensorboard import SummaryWriter
@@ -17,7 +19,19 @@ if str(ROOT) not in sys.path:  # pragma: no branch
     sys.path.insert(0, str(ROOT))
 
 from sparta_wrapper.hanabi_utils import build_observation, move_to_dict
-from sparta_wrapper.gru_blueprint import GRU_CFG, NaiveGRUBlueprint
+from sparta_wrapper.gru_blueprint import GRUBlueprint
+
+import sys
+from pathlib import Path
+
+from hanabi_learning_environment import pyhanabi
+
+# Ensure the repo root is importable so sibling package hanabi_gru_baseline can be used.
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from hanabi_gru_baseline.config import CFG as GRU_CFG
 
 
 def _format_card(card: pyhanabi.HanabiCard) -> str:
@@ -104,7 +118,6 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Evaluate a Hanabi GRU blueprint (no SPARTA).")
     ap.add_argument("--episodes", type=int, default=20, help="Number of episodes to average.")
     ap.add_argument("--ckpt", type=str, default="gru_checkpoints/ckpt_020000.pt", help="Checkpoint path.")
-    ap.add_argument("--device", type=str, default="cuda", help="Device for GRU blueprint (cpu|cuda).")
     ap.add_argument("--logdir", type=str, default="", help="TensorBoard log directory (empty to disable).")
     ap.add_argument("--render", action="store_true", help="Print an omniscient, human-readable game log.")
     args = ap.parse_args()
@@ -113,7 +126,7 @@ def main() -> None:
     if not ckpt_path.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
-    blueprint_factory = lambda: NaiveGRUBlueprint(GRU_CFG(), ckpt_path, device=args.device)
+    blueprint_factory = lambda: GRUBlueprint(ckpt_path=ckpt_path, model_cfg=GRU_CFG)
 
     writer: SummaryWriter | None = None
     if args.logdir:

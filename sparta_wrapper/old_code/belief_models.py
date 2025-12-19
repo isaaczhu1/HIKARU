@@ -200,8 +200,8 @@ def _predict_partner(blueprint_factory, state, my_id, partner_id, my_hand_guess)
 
 
 def sample_world_state(
-    lagging_state: pyhanabi.HanabiState,
-    obs: HanabiObservation,
+    lagging_state: pyhanabi.HanabiState, # state from one turn ago
+    obs: HanabiObservation, # current observation
     rng: random.Random,
     blueprint_factory: Callable[[], object] | None = None,
     takes: int = 8,
