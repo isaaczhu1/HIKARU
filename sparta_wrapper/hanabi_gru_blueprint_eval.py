@@ -71,43 +71,40 @@ def _render_step(step: int, pid: int, action_dict, state: pyhanabi.HanabiState) 
     print(f"\n--- Turn {step} | Player {pid} plays {move_desc} ---", flush=True)
     print(_format_state(state), flush=True)
 
+import random
 
-def _run_episode(env: rl_env.HanabiEnv, actors: List[Callable], render: bool = False) -> float:
-    env.reset()
-    state = env.state
+def _run_episode(actors: List[Callable], render: bool = False) -> float:
+    this_cfg = HANABI_GAME_CONFIG
+    this_cfg["seed"] = random.randint(0, 2147483648)
+    game = pyhanabi.HanabiGame(this_cfg)
+    state = game.new_initial_state()
     if render:
         print("\n=== New Game ===", flush=True)
         print(_format_state(state), flush=True)
 
     turn = 0
     while not state.is_terminal():
+        if state.cur_player() == pyhanabi.CHANCE_PLAYER_ID:
+            state.deal_random_card()
+            continue
         pid = state.cur_player()
         prev_score = state.score()  # keep score before potentially losing a life
         player_obs = build_observation(state, pid)
         action_move = actors[pid](player_obs)
-        action_dict = move_to_dict(action_move)
-        _, _, done, info = env.step(action_dict)
-        state = env.state
+        state.apply_move(action_move)
         turn += 1
-        if render:
-            _render_step(turn, pid, action_dict, state)
-        if done:
-            # If we lost on lives, preserve the score *before* the fatal mistake.
-            if state.life_tokens() == 0:
-                return float(info.get("score", prev_score))
-            return float(info.get("score", state.score()))
-    # Terminal without early done
-    return float(state.score())
+    if state.life_tokens() == 0:
+        return float(state.__dict__.get("score", prev_score))
+    return float(state.__dict__.get("score", state.score()))
 
 
 def evaluate(episodes: int, blueprint_factory: Callable[[], object], writer: SummaryWriter | None = None, prefix: str = "gru_blueprint", render: bool = False) -> float:
-    env = rl_env.HanabiEnv({"players": 2})
     scores = []
     from tqdm import tqdm
     for ep in tqdm(range(episodes)):
         bps = [blueprint_factory(), blueprint_factory()]
         actors = [lambda obs, bp=bps[0]: bp.act(obs), lambda obs, bp=bps[1]: bp.act(obs)]
-        score = _run_episode(env, actors, render=render)
+        score = _run_episode(actors, render=render)
         scores.append(score)
         if writer is not None:
             writer.add_scalar(f"{prefix}/score", score, ep + 1)
@@ -121,7 +118,11 @@ def main() -> None:
     ap.add_argument("--ckpt", type=str, default="gru_checkpoints/ckpt_020000.pt", help="Checkpoint path.")
     ap.add_argument("--logdir", type=str, default="", help="TensorBoard log directory (empty to disable).")
     ap.add_argument("--render", action="store_true", help="Print an omniscient, human-readable game log.")
+    ap.add_argument("--seed", type=int, default=67, help="Number of episodes to average.")
     args = ap.parse_args()
+    
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
 
     ckpt_path = Path(args.ckpt).resolve()
     if not ckpt_path.is_file():
