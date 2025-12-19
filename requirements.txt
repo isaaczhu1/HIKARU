@@ -1,0 +1,6 @@
+torch
+numpy
+gymnasium
+hanabi_learning_environment
+tqdm
+pytest

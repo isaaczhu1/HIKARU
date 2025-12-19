@@ -32,6 +32,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from hanabi_gru_baseline.config import CFG as GRU_CFG
+from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
 
 
 def _format_card(card: pyhanabi.HanabiCard) -> str:
@@ -126,7 +127,7 @@ def main() -> None:
     if not ckpt_path.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
-    blueprint_factory = lambda: GRUBlueprint(ckpt_path=ckpt_path, model_cfg=GRU_CFG)
+    blueprint_factory = lambda: GRUBlueprint(ckpt_path=ckpt_path, model_cfg=GRU_CFG, hanabi_cfg=HANABI_GAME_CONFIG)
 
     writer: SummaryWriter | None = None
     if args.logdir:

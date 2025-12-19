@@ -15,9 +15,9 @@ class GRUBlueprint:
     @torch.no_grad()
     def logits(self, obs, prev_self_action=None):
         """Select an action for the current player given HanabiObservation."""
-        obs_vec = self._encode_vectorized_observation(observation)
+        obs_vec = self._encode_vectorized_observation(obs)
 
-        seat = torch.tensor([[observation.current_player]], device=self.device, dtype=torch.long)
+        seat = torch.tensor([[obs.current_player]], device=self.device, dtype=torch.long)
 
         # Build legal mask and map legal moves to ids
         legal_ids = [self._id_from_move(m) for m in obs.legal_moves]
@@ -29,7 +29,7 @@ class GRUBlueprint:
         legal_mask = legal_mask.view(1, 1, -1)
 
         # Previous other action: use last move from opponent if available
-        prev_other_id = self._extract_prev_other_id(observation, legal_ids)
+        prev_other_id = self._extract_prev_other_id(obs, legal_ids)
         prev_other = torch.tensor([[prev_other_id]], device=self.device, dtype=torch.long)
 
         # Optional previous self action embedding
@@ -88,7 +88,7 @@ class GRUBlueprint:
         encoder = self._encoder_cache.get(game_ptr)
         if encoder is None:
             encoder = pyhanabi.ObservationEncoder(
-                _GameShim(game_ptr), pyhanabi.ObservationEncoderType.CANONICAL
+                game_ptr, pyhanabi.ObservationEncoderType.CANONICAL
             )
             self._encoder_cache[game_ptr] = encoder
 
