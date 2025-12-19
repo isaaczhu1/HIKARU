@@ -2,6 +2,18 @@ from sparta_wrapper.sparta_config import DEVICE
 from sparta_wrapper.shared_model import _get_shared_model, _resolve_device
 import torch
 from hanabi_learning_environment import pyhanabi
+
+# codex really wants this object for some reason
+class _GameShim:
+    """Light shim to mirror rl_env's ObservationEncoder game handle contract."""
+
+    def __init__(self, c_game):
+        self._game = c_game
+
+    @property
+    def c_game(self):
+        return self._game
+
 class GRUBlueprint:
     def __init__(self, ckpt_path, model_cfg, hanabi_cfg):
         self.ckpt_path = ckpt_path
@@ -9,10 +21,13 @@ class GRUBlueprint:
         self.hanabi_cfg = hanabi_cfg
 
         self.shared_model = _get_shared_model(ckpt_path, model_cfg, _resolve_device(DEVICE))
-        
+        self.device = self.shared_model.device
+
+        self._sentinel_none = self.shared_model.num_moves
+
         self._h = self.shared_model.initial_state()
+        self._encoder_cache = {}
         
-    @torch.no_grad()
     def logits(self, obs, prev_self_action=None):
         """Select an action for the current player given HanabiObservation."""
         obs_vec = self._encode_vectorized_observation(obs)
@@ -21,10 +36,10 @@ class GRUBlueprint:
 
         # Build legal mask and map legal moves to ids
         legal_ids = [self._id_from_move(m) for m in obs.legal_moves]
-        legal_mask = torch.zeros(self.num_moves, device=self.device, dtype=torch.float32)
+        legal_mask = torch.zeros(self.shared_model.num_moves, device=self.device, dtype=torch.float32)
         
         for gid in legal_ids:
-            if 0 <= gid < self.num_moves:
+            if 0 <= gid < self.shared_model.num_moves:
                 legal_mask[gid] = 1.0
         legal_mask = legal_mask.view(1, 1, -1)
 
@@ -34,7 +49,7 @@ class GRUBlueprint:
 
         # Optional previous self action embedding
         prev_self = None
-        if getattr(self._net, "include_prev_self", False):
+        if getattr(self.shared_model.net, "include_prev_self", False):
             prev_self_id = self._prev_self_id if prev_self_action is None else int(prev_self_action)
             prev_self = torch.tensor([[prev_self_id]], device=self.device, dtype=torch.long)
 
@@ -64,16 +79,13 @@ class GRUBlueprint:
         action_id = int(dist.sample().item())
 
         # Track prev self for next step if applicable
-        if getattr(self._net, "include_prev_self", False):
+        if getattr(self.shared_model.net, "include_prev_self", False):
             self._prev_self_id = action_id
 
         # Map chosen id back to actual pyhanabi move
         move = self._move_from_id(action_id, obs.legal_moves)
         return move
-
-        
-        
-        
+    
 
     # ------------------------------------------------------------------
     # Helpers
@@ -88,13 +100,13 @@ class GRUBlueprint:
         encoder = self._encoder_cache.get(game_ptr)
         if encoder is None:
             encoder = pyhanabi.ObservationEncoder(
-                game_ptr, pyhanabi.ObservationEncoderType.CANONICAL
+                _GameShim(game_ptr), pyhanabi.ObservationEncoderType.CANONICAL
             )
             self._encoder_cache[game_ptr] = encoder
 
         vec = encoder.encode(observation.raw_observation)
         obs_vec = torch.tensor(vec, dtype=torch.float32, device=self.device).view(1, 1, -1)
-        target = self.obs_dim
+        target = self.shared_model.obs_dim
         cur = obs_vec.shape[-1]
         if cur != target:
             if cur < target:
@@ -110,11 +122,11 @@ class GRUBlueprint:
         if t == pyhanabi.HanabiMoveType.PLAY:
             return move.card_index()
         if t == pyhanabi.HanabiMoveType.DISCARD:
-            return self._hand_size + move.card_index()
+            return self.shared_model.hand_size + move.card_index()
         if t == pyhanabi.HanabiMoveType.REVEAL_COLOR:
-            return 2 * self._hand_size + move.color()
+            return 2 * self.shared_model.hand_size + move.color()
         if t == pyhanabi.HanabiMoveType.REVEAL_RANK:
-            return 2 * self._hand_size + self._colors + move.rank()
+            return 2 * self.shared_model.hand_size + self.shared_model.colors + move.rank()
         return -1
 
     def _move_from_id(self, gid: int, legal_moves):

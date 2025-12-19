@@ -25,11 +25,11 @@ from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG, DEVICE, DEBUG
 # Shared model cache: load each checkpoint/device pair once per process.
 # -----------------------------------------------------------------------------
 class _SharedModel:
-    def __init__(self, net, obs_dim, num_moves, hidden, hand_size, colors, ranks, hint_target_offset, device):
+    def __init__(self, net, obs_dim, num_moves, hidden_dim, hand_size, colors, ranks, hint_target_offset, device):
         self.net = net
         self.obs_dim = obs_dim
         self.num_moves = num_moves
-        self.hidden = hidden
+        self.hidden_dim = hidden_dim
         self.hand_size = hand_size
         self.colors = colors
         self.ranks = ranks
@@ -37,7 +37,7 @@ class _SharedModel:
         self.device = device
     
     @torch.no_grad()    
-    def forward(self, obs_vec, seat, prev_other, hidden, prev_self):
+    def forward(self, obs_vec, seat, prev_other, h, prev_self):
         """
         return the result of a forward pass
         """
@@ -45,7 +45,7 @@ class _SharedModel:
             obs_vec=obs_vec,
             seat=seat,
             prev_other=prev_other,
-            h=self._h,
+            h=h,
             prev_self=prev_self,
         )
         return logits, _, h_new
@@ -65,7 +65,10 @@ def _resolve_device(device: str | torch.device | None) -> torch.device:
     return target
 
 
-def _get_shared_model(model_config, model_ckpt_path, device: torch.device) -> _SharedModel:
+def _get_shared_model(model_ckpt_path, model_config, device: torch.device) -> _SharedModel:
+    """
+    Loads the "_SharedModel" weights from the given model checkpoint path and device.
+    """
     device = _resolve_device(device)
     key = (str(Path(model_ckpt_path).resolve()), str(device))
     cached = _MODEL_CACHE.get(key)
@@ -78,7 +81,7 @@ def _get_shared_model(model_config, model_ckpt_path, device: torch.device) -> _S
     # Infer architecture from the checkpoint to avoid mismatch issues.
     obs_w = model_state["obs_fe.0.weight"]
     pi_w = model_state["pi.weight"]
-    hidden = obs_w.shape[0]
+    hidden_dim = obs_w.shape[0]
     obs_dim = obs_w.shape[1]
     num_moves = pi_w.shape[0]
     action_emb_dim = model_state["prev_other_emb.weight"].shape[1]
@@ -88,7 +91,7 @@ def _get_shared_model(model_config, model_ckpt_path, device: torch.device) -> _S
     # Allow config overrides for hidden sizes if provided; otherwise stick to checkpoint-derived.
     cfg_model = getattr(model_config, "model", None)
     if cfg_model is not None:
-        hidden = getattr(cfg_model, "hidden", hidden)
+        hidden_dim = getattr(cfg_model, "hidden", hidden_dim)
         action_emb_dim = getattr(cfg_model, "action_emb", action_emb_dim)
         seat_emb_dim = getattr(cfg_model, "seat_emb", seat_emb_dim)
         include_prev_self = getattr(cfg_model, "include_prev_self", include_prev_self)
@@ -96,7 +99,7 @@ def _get_shared_model(model_config, model_ckpt_path, device: torch.device) -> _S
     net = HanabiGRUPolicy(
         obs_dim=obs_dim,
         num_moves=num_moves,
-        hidden=hidden,
+        hidden=hidden_dim,
         action_emb_dim=action_emb_dim,
         seat_emb_dim=seat_emb_dim,
         include_prev_self=include_prev_self,
@@ -116,7 +119,7 @@ def _get_shared_model(model_config, model_ckpt_path, device: torch.device) -> _S
         net=net,
         obs_dim=obs_dim,
         num_moves=num_moves,
-        hidden=hidden,
+        hidden_dim=hidden_dim,
         hand_size=hand_size,
         colors=colors,
         ranks=ranks,
