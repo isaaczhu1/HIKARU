@@ -41,22 +41,30 @@ def unmask_card(move):
     rank = int(rank_char) - 1
     return pyhanabi.HanabiCard(color=color, rank=rank)
 
-def unserialize_move(serialized):
+def unserialize(serialized):
     """
     unserialize a pyhanabi move
+    Some preprocessing occurs:
+        - *** DEAL MOVES BECOME DEAL SPECIFIC MOVES ***
+        - serialized colors will be forced to int
     """
     method_map = {
-        pyhanabi.HanabiMoveType.INVALID.name : (lambda: raise ValueError("cannot unserialize invalid move")),
-        pyhanabi.HanabiMoveType.PLAY.name : pyhanabi.HanabiMove.get_play_move
-        pyhanabi.HanabiMoveType.DISCARD.name : pyhanabi.HanabiMove.get_discard_move
-        pyhanabi.HanabiMoveType.REVEAL_COLOR.name : pyhanabi.HanabiMove.get_reveal_color_move
-        pyhanabi.HanabiMoveType.REVEAL_RANK.name : pyhanabi.HanabiMove.get_reveal_rank_move
-        pyhanabi.HanabiMoveType.DEAL.name : pyhanabi.HanabiMove.get_deal_move
-        pyhanabi.HanabiMoveType.RETURN.name : pyhanabi.HanabiMove.get_return_move
-        pyhanabi.HanabiMoveType.DEAL_SPECIFIC.name : pyhanabi.HanabiMove.get_deal_specific_move
+        pyhanabi.HanabiMoveType.PLAY.name : pyhanabi.HanabiMove.get_play_move,
+        pyhanabi.HanabiMoveType.DISCARD.name : pyhanabi.HanabiMove.get_discard_move,
+        pyhanabi.HanabiMoveType.REVEAL_COLOR.name : pyhanabi.HanabiMove.get_reveal_color_move,
+        pyhanabi.HanabiMoveType.REVEAL_RANK.name : pyhanabi.HanabiMove.get_reveal_rank_move,
+        pyhanabi.HanabiMoveType.DEAL.name : pyhanabi.HanabiMove.get_deal_specific_move,
+        pyhanabi.HanabiMoveType.RETURN.name : pyhanabi.HanabiMove.get_return_move,
+        pyhanabi.HanabiMoveType.DEAL_SPECIFIC.name : pyhanabi.HanabiMove.get_deal_specific_move,
     }
     
-    return method_map[serialized["action_type"]](**serialized)
+    serialized_copy = serialized.copy()
+    del serialized_copy["action_type"]
+    
+    if "color" in serialized_copy and isinstance(serialized_copy["color"], str):
+        serialized_copy["color"] = pyhanabi.color_char_to_idx(serialized_copy["color"])
+        
+    return method_map[serialized["action_type"]](**serialized_copy)
 
 def fabricate_history(state, guesser_id, guessed_hand):
     """
@@ -68,6 +76,7 @@ def fabricate_history(state, guesser_id, guessed_hand):
     hand_sz = HANABI_GAME_CONFIG["hand_size"]
     
     deck = []
+    dealt_to = []
     deck_index = 0
     
     hands_tracker = [[] for _ in player_range]
@@ -87,12 +96,13 @@ def fabricate_history(state, guesser_id, guessed_hand):
                 if len(hands_tracker[deal_to]) < hand_sz:
                     hands_tracker[deal_to].append(deck_index)
                     deck.append(card)
+                    dealt_to.append(deal_to)
                     deck_index += 1
                     break
                 
         elif move.move().type() in [pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD]:
             card_pos = move.move().card_index()
-            deck_tracking[affected_player].pop(card_pos)
+            hands_tracker[affected_player].pop(card_pos)
     
     # overwrite cards
     for index, card in zip(hands_tracker[guesser_id], guessed_hand):
@@ -103,14 +113,17 @@ def fabricate_history(state, guesser_id, guessed_hand):
     # overwrite history
     fabricated_history = []
     for move in state.move_history():
+        
         affected_player = move.player()
+        move_only = move.move()
         
         # serialize and modify
-        serialized = move.to_dict()
+        serialized = move_only.to_dict()
         if affected_player == pyhanabi.CHANCE_PLAYER_ID:
-            serialized["action_type"] = "DEAL_SPECIFIC"
+            serialized["player"] = dealt_to[deck_index]
             serialized["color"] = deck[deck_index].color()
             serialized["rank"] = deck[deck_index].rank()
+            deck_index += 1
             
         # hopefully lib-safe construction
         fabricated_history.append(unserialize(serialized))
