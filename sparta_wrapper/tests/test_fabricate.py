@@ -40,6 +40,9 @@ def fabricate_test1():
         state.deal_random_card()    
     print(state)
     
+    print(state.card_count_from_perspective(2, 4, 0)) # should be 1
+    print(state.card_count_from_perspective(2, 4, 1)) # should be 0
+    
     guesser_id = 1
     guessed_hand_names = ["G3", "B3", "R3", "B1", "R5"]
     guessed_hand = [pyhanabi.HanabiCard(pyhanabi.color_char_to_idx(card[0]), int(card[1])-1) for card in guessed_hand_names]
