@@ -1,5 +1,6 @@
 from sparta_wrapper.sparta_config import DEVICE
 from sparta_wrapper.shared_model import _get_shared_model, _resolve_device
+from sparta_wrapper.hanabi_utils import unserialize
 import torch
 from hanabi_learning_environment import pyhanabi
 
@@ -32,10 +33,10 @@ class GRUBlueprint:
         """Select an action for the current player given HanabiObservation."""
         obs_vec = self._encode_vectorized_observation(obs)
 
-        seat = torch.tensor([[obs.current_player]], device=self.device, dtype=torch.long)
+        seat = torch.tensor([[obs.get_player()]], device=self.device, dtype=torch.long)
 
         # Build legal mask and map legal moves to ids
-        legal_ids = [self._id_from_move(m) for m in obs.legal_moves]
+        legal_ids = [self._id_from_move(m) for m in obs.legal_moves()]
         legal_mask = torch.zeros(self.shared_model.num_moves, device=self.device, dtype=torch.float32)
         
         for gid in legal_ids:
@@ -83,7 +84,7 @@ class GRUBlueprint:
             self._prev_self_id = action_id
 
         # Map chosen id back to actual pyhanabi move
-        move = self._move_from_id(action_id, obs.legal_moves)
+        move = self._move_from_id(action_id, obs.legal_moves())
         return move
     
 
@@ -96,7 +97,7 @@ class GRUBlueprint:
         (same as rl_env's 'vectorized' field), then pad/trim to the trained obs_dim.
         """
         # Cache encoder per underlying game to avoid reconstructing every call.
-        game_ptr = observation.raw_observation._game
+        game_ptr = observation._game
         encoder = self._encoder_cache.get(game_ptr)
         if encoder is None:
             encoder = pyhanabi.ObservationEncoder(
@@ -104,7 +105,7 @@ class GRUBlueprint:
             )
             self._encoder_cache[game_ptr] = encoder
 
-        vec = encoder.encode(observation.raw_observation)
+        vec = encoder.encode(observation)
         obs_vec = torch.tensor(vec, dtype=torch.float32, device=self.device).view(1, 1, -1)
         target = self.shared_model.obs_dim
         cur = obs_vec.shape[-1]
@@ -138,40 +139,17 @@ class GRUBlueprint:
 
     def _extract_prev_other_id(self, observation, legal_ids):
         # last_moves are ordered most recent first; find an opponent move
-        for item in observation.last_moves:
-            pid = item.get("player")
-            move_dict = item.get("move")
+        for item in observation.last_moves():
+            pid = item.player()
+            move_dict = item.move().to_dict()
             if pid is None or move_dict is None:
                 continue
-            if pid == observation.player_id:
+            if pid == observation.get_player() or pid == pyhanabi.CHANCE_PLAYER_ID:
                 continue
-            move = self._dict_to_move(move_dict)
+            move = unserialize(move_dict)
             if move is None:
                 continue
             gid = self._id_from_move(move)
             if gid >= 0:
                 return gid
         return self._sentinel_none
-
-    def _dict_to_move(self, move_dict):
-        # Minimal converter using pyhanabi helpers
-        action_type = move_dict.get("action_type")
-        if action_type == "PLAY":
-            return pyhanabi.HanabiMove.get_play_move(int(move_dict["card_index"]))
-        if action_type == "DISCARD":
-            return pyhanabi.HanabiMove.get_discard_move(int(move_dict["card_index"]))
-        if action_type == "REVEAL_COLOR":
-            color = move_dict["color"]
-            if isinstance(color, str):
-                color = pyhanabi.color_char_to_idx(color)
-            return pyhanabi.HanabiMove.get_reveal_color_move(
-                int(move_dict["target_offset"]), int(color)
-            )
-        if action_type == "REVEAL_RANK":
-            return pyhanabi.HanabiMove.get_reveal_rank_move(
-                int(move_dict["target_offset"]), int(move_dict["rank"])
-            )
-        if action_type in ["DEAL", "DEAL_SPECIFIC"]:
-            return None
-        raise ValueError(f"Unsupported move dict: {move_dict}")
-        

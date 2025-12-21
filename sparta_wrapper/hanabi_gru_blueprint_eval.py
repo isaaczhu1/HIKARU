@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:  # pragma: no branch
     sys.path.insert(0, str(ROOT))
 
-from sparta_wrapper.hanabi_utils import build_observation, move_to_dict
 from sparta_wrapper.gru_blueprint import GRUBlueprint
 
 import sys
@@ -89,7 +88,7 @@ def _run_episode(actors: List[Callable], render: bool = False) -> float:
             continue
         pid = state.cur_player()
         prev_score = state.score()  # keep score before potentially losing a life
-        player_obs = build_observation(state, pid)
+        player_obs = state.observation(pid)
         action_move = actors[pid](player_obs)
         state.apply_move(action_move)
         turn += 1
