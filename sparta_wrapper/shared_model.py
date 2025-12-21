@@ -17,7 +17,7 @@ from hanabi_gru_baseline.config import CFG as GRU_CFG
 from hanabi_gru_baseline.model import HanabiGRUPolicy
 from hanabi_gru_baseline.utils import load_ckpt
 
-from sparta_wrapper.hanabi_utils import fabricate, build_observation, advance_state, _debug
+from sparta_wrapper.hanabi_utils import _debug
 from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG, DEVICE, DEBUG
 
 
