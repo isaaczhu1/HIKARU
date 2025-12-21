@@ -65,7 +65,30 @@ def unmask_card(move):
     move has a representation of the form <(Deal XY)> where X is color and Y is suit.
     Recover the color and suit, and map them back to the numerical values they are assigned in pyhanabi.
     """
-    return pyhanabi.HanabiCard(color=move.color(), rank=move.rank())
+    if isinstance(move, pyhanabi.HanabiMove):
+        move = str(move)
+    s = str(move).strip()
+    # Expect formats like "<(Deal W4)>" or "(Deal W4)"
+    if s.startswith("<") and s.endswith(">"):
+        s = s[1:-1]
+    s = s.strip()
+    if s.startswith("(") and s.endswith(")"):
+        s = s[1:-1]
+
+    parts = s.split()
+    if len(parts) != 2 or parts[0].lower() != "deal":
+        raise ValueError(f"Unsupported move format for unmask_card: {move}")
+
+    card = parts[1]
+    if len(card) != 2:
+        raise ValueError(f"Unsupported card token in move: {move}")
+
+    color_char = card[0]
+    rank_char = card[1]
+
+    color = pyhanabi.color_char_to_idx(color_char)
+    rank = int(rank_char) - 1
+    return pyhanabi.HanabiCard(color=color, rank=rank)
 
 __all__ = [
     "_advance_chance_events",
