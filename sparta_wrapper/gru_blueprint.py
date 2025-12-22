@@ -87,6 +87,10 @@ class GRUBlueprint:
         move = self._move_from_id(action_id, obs.legal_moves())
         return move
     
+    def reset_episode(self):
+        self._h = self.shared_model.initial_state()
+        if getattr(self.shared_model.net, "include_prev_self", False):
+            self._prev_self_id = self._sentinel_none
 
     # ------------------------------------------------------------------
     # Helpers
