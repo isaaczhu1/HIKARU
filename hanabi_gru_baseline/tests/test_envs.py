@@ -70,13 +70,13 @@ from hanabi_gru_baseline.hanabi_envs import HanabiEnv2P  # noqa: E402  (after st
 
 
 def test_observation_vector_length_matches_probe():
-    env = HanabiEnv2P(seed=0, obs_conf="minimal")
+    env = HanabiEnv2P(seed=0)
     obs = env.reset()
     assert obs["obs"].shape == (VEC_LEN,)
 
 
 def test_reset_preserves_full_vectorized_observation():
-    env = HanabiEnv2P(seed=0, obs_conf="minimal")
+    env = HanabiEnv2P(seed=0)
     obs = env.reset()
     np.testing.assert_array_equal(obs["obs"], np.arange(VEC_LEN, dtype=np.float32))
 
@@ -88,7 +88,7 @@ def test_legal_mask_marks_all_stub_moves(monkeypatch):
         pass
 
     monkeypatch.setattr(target_mod, "HanabiEnv", RecordingEnv)
-    env = HanabiEnv2P(seed=0, obs_conf="minimal", players=2, colors=2, ranks=2, hand_size=2)
+    env = HanabiEnv2P(seed=0, players=2, colors=2, ranks=2, hand_size=2)
     obs = env.reset()
     legal_ids = np.flatnonzero(obs["legal_mask"]).tolist()
     raw_obs = env._env._make_obs()
@@ -103,7 +103,7 @@ def test_hint_actions_include_target_offset(monkeypatch):
         pass
 
     monkeypatch.setattr(target_mod, "HanabiEnv", RecordingEnv)
-    env = HanabiEnv2P(seed=0, obs_conf="minimal", players=2, colors=2, ranks=2, hand_size=2)
+    env = HanabiEnv2P(seed=0, players=2, colors=2, ranks=2, hand_size=2)
     env.reset()
     hint_id = env._a_reveal_color0
     obs, reward, terminated, _ = env.step(hint_id)
@@ -119,7 +119,7 @@ def test_prev_other_action_tracks_last_move(monkeypatch):
         pass
 
     monkeypatch.setattr(target_mod, "HanabiEnv", RecordingEnv)
-    env = HanabiEnv2P(seed=0, obs_conf="minimal", players=2, colors=2, ranks=2, hand_size=2)
+    env = HanabiEnv2P(seed=0, players=2, colors=2, ranks=2, hand_size=2)
     obs = env.reset()
     assert int(obs["prev_other_action"]) == env.sentinel_none
     play_id = env._a_play0

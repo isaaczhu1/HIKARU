@@ -6,7 +6,6 @@ from hanabi_envs import HanabiEnv2P
 def main():
     env = HanabiEnv2P(
         seed=123,
-        obs_conf="minimal",
         players=2,
         colors=2,
         ranks=2,

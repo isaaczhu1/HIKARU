@@ -49,8 +49,8 @@ def parse_args():
 
 
 # ----------------------------- Vec env factory ------------------------------- #
-def make_vec_env(n_envs, seed0, obs_conf="minimal", hanabi_cfg=None):
-    return HanabiVecEnvSync(n_envs=n_envs, seed0=seed0, obs_conf=obs_conf, hanabi_cfg=hanabi_cfg)
+def make_vec_env(n_envs, seed0, hanabi_cfg=None):
+    return HanabiVecEnvSync(n_envs=n_envs, seed0=seed0, hanabi_cfg=hanabi_cfg)
 
 
 # ----------------------------- Env reset helper ------------------------------ #
@@ -176,7 +176,6 @@ def run_eval(net, cfg, device, n_episodes=16, greedy=True):
     # Single eval env, same game config as training
     eval_env = HanabiEnv2P(
         seed=cfg.seed + 12345,
-        obs_conf=cfg.obs_mode,
         players=cfg.hanabi.players,
         colors=cfg.hanabi.colors,
         ranks=cfg.hanabi.ranks,
@@ -267,7 +266,7 @@ def main(cfg: CFG, args):
     print(f"[info] Hanabi {cfg.hanabi.colors}x{cfg.hanabi.ranks}, max score = {max_score}")
 
     # ---------- Environments ---------- #
-    env = make_vec_env(cfg.num_envs, cfg.seed, obs_conf=cfg.obs_mode, hanabi_cfg=cfg.hanabi)
+    env = make_vec_env(cfg.num_envs, cfg.seed, hanabi_cfg=cfg.hanabi)
     obs_dict = env.reset_all(seed0=cfg.seed)
     print("[debug] initial legal sums:", obs_dict["legal_mask"].sum(axis=1)[:8])
 

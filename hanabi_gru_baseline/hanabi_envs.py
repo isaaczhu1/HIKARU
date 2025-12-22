@@ -32,7 +32,6 @@ class HanabiEnv2P:
     def __init__(
         self,
         seed: int,
-        obs_conf: str,
         *,
         players: int = 2,
         colors: int = 5,
@@ -309,11 +308,10 @@ def stack_obs_list(obs_list: Sequence[Dict[str, Any]]) -> Dict[str, np.ndarray]:
 class HanabiVecEnvSync:
     """Simple synchronous vectorized env wrapper that owns multiple HanabiEnv2P."""
 
-    def __init__(self, n_envs: int, seed0: int, obs_conf: str, hanabi_cfg) -> None:
+    def __init__(self, n_envs: int, seed0: int) -> None:
         self.envs: List[HanabiEnv2P] = [
             HanabiEnv2P(
                 seed=seed0 + i,
-                obs_conf=obs_conf,
                 players=hanabi_cfg.players,
                 colors=hanabi_cfg.colors,
                 ranks=hanabi_cfg.ranks,

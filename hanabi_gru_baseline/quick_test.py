@@ -1,7 +1,7 @@
 from hanabi_envs import HanabiEnv2P
 import numpy as np
 
-e = HanabiEnv2P(seed=0, obs_conf="minimal")
+e = HanabiEnv2P(seed=0)
 obs = e.reset()
 print("Seat at reset:", obs["seat"], "obs_shape:", obs["obs"].shape)
 print("Sum legal at reset:", float(obs["legal_mask"].sum()))

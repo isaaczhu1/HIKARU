@@ -46,7 +46,6 @@ def parse_args():
 def build_env(cfg: CFG, seed: int):
     return HanabiEnv2P(
         seed=seed,
-        obs_conf=cfg.obs_mode,
         players=cfg.hanabi.players,
         colors=cfg.hanabi.colors,
         ranks=cfg.hanabi.ranks,
