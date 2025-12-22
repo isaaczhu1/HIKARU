@@ -10,6 +10,7 @@ from typing import Callable, List
 print("importing torch")
 import torch
 print("imported torch")
+import random
 from hanabi_learning_environment import rl_env
 from hanabi_learning_environment import pyhanabi
 from torch.utils.tensorboard import SummaryWriter
@@ -70,11 +71,14 @@ def _render_step(step: int, pid: int, action_dict, state: pyhanabi.HanabiState) 
     print(f"\n--- Turn {step} | Player {pid} plays {move_desc} ---", flush=True)
     print(_format_state(state), flush=True)
 
-import random
+def _run_episode(actors: List[Callable], seed: int, render: bool = False) -> float:
+    this_cfg = dict(HANABI_GAME_CONFIG)
+    this_cfg["seed"] = int(seed)
 
-def _run_episode(actors: List[Callable], render: bool = False) -> float:
-    this_cfg = HANABI_GAME_CONFIG
-    this_cfg["seed"] = random.randint(0, 2147483648)
+    # seed random and torch
+    random.seed(seed)
+    torch.manual_seed(seed)
+
     game = pyhanabi.HanabiGame(this_cfg)
     state = game.new_initial_state()
     if render:
@@ -97,13 +101,20 @@ def _run_episode(actors: List[Callable], render: bool = False) -> float:
     return float(state.__dict__.get("score", state.score()))
 
 
-def evaluate(episodes: int, blueprint_factory: Callable[[], object], writer: SummaryWriter | None = None, prefix: str = "gru_blueprint", render: bool = False) -> float:
+def evaluate(
+    episodes: int, 
+    blueprint_factory: Callable[[], object], 
+    writer: SummaryWriter | None = None, 
+    prefix: str = "gru_blueprint", 
+    render: bool = False,
+    base_seed: int = 0,
+    ) -> float:
     scores = []
     from tqdm import tqdm
     for ep in tqdm(range(episodes)):
         bps = [blueprint_factory(), blueprint_factory()]
         actors = [lambda obs, bp=bps[0]: bp.act(obs), lambda obs, bp=bps[1]: bp.act(obs)]
-        score = _run_episode(actors, render=render)
+        score = _run_episode(actors, seed=base_seed + ep, render=render)
         scores.append(score)
         if writer is not None:
             writer.add_scalar(f"{prefix}/score", score, ep + 1)
@@ -117,11 +128,12 @@ def main() -> None:
     ap.add_argument("--ckpt", type=str, default="gru_checkpoints/ckpt_020000.pt", help="Checkpoint path.")
     ap.add_argument("--logdir", type=str, default="", help="TensorBoard log directory (empty to disable).")
     ap.add_argument("--render", action="store_true", help="Print an omniscient, human-readable game log.")
-    ap.add_argument("--seed", type=int, default=67, help="Number of episodes to average.")
+    ap.add_argument("--seed", type=int, default=0, help="Number of episodes to average.")
     args = ap.parse_args()
     
-    random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    # we instead do the random, torch, and numpy seeding per-episode in _run_episode
+    # random.seed(args.seed)
+    # torch.manual_seed(args.seed)
 
     ckpt_path = Path(args.ckpt).resolve()
     if not ckpt_path.is_file():
@@ -139,6 +151,7 @@ def main() -> None:
         writer=writer,
         prefix="gru_blueprint",
         render=args.render,
+        base_seed=args.seed,
     )
 
     if writer is not None:
