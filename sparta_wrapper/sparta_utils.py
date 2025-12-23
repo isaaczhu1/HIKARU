@@ -75,6 +75,15 @@ def fabricate_history(state, guesser_id, guessed_hand):
         
     return fabricated_history
 
+def remaining_deck(state, colors=HANABI_GAME_CONFIG["colors"], ranks=HANABI_GAME_CONFIG["ranks"]):
+    cards = []
+    for color in range(colors):
+        for rank in range(ranks):
+            counts = state.card_count(color=color, rank=rank)
+            for _ in range(counts):
+                cards.append(pyhanabi.HanabiCard(color=color, rank=rank))
+    return cards
+
 def consistent_hand_sampler(state, obs, colors=HANABI_GAME_CONFIG["colors"], ranks=HANABI_GAME_CONFIG["ranks"], hand_size=HANABI_GAME_CONFIG["hand_size"]):
     """
     get the sampler function
@@ -106,3 +115,71 @@ def consistent_hand_sampler(state, obs, colors=HANABI_GAME_CONFIG["colors"], ran
                 return [cards[i] for i in sampled]
     
     return sample
+
+class SimulatedGame:
+    def __init__(self, history, set_deck, actor_blueprint, hanabi_game_config=HANABI_GAME_CONFIG):
+        self.history = history
+        self.game = pyhanabi.HanabiGame(hanabi_game_config)
+        self.state = self.game.new_initial_state()
+        self.history_ptr = 0
+        self.set_deck = set_deck
+        self.deck_ptr = 0
+        
+        self.deal_to = None
+        self.actors = [actor_blueprint() for _ in range(hanabi_game_config["players"])]
+        self.peak_score = 0
+        
+    def apply_move(self, move):
+        if move.type() in [pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD]:
+            self.deal_to = move.player()
+        self.state.apply_move(move)
+        self.peak_score = max(self.peak_score, self.state.score())
+    
+    # begin haram
+    def exhausted_history(self):
+        return self.history_ptr >= len(self.history)
+    
+    def read_next_history_item(self):
+        assert not self.exhausted_history(), "bruh there is no more fabricated history"
+        ret = self.history[self.history_ptr]
+        self.history_ptr += 1
+        return ret
+    
+    def exhausted_deck(self):
+        return self.deck_ptr >= len(self.set_deck)
+    
+    def read_next_card(self):
+        assert self.exhausted_history(), "you must consume all the fabricated history first"
+        assert not self.exhausted_deck(), "please stop trolling"
+        ret = self.set_deck[self.deck_ptr]
+        self.deck_ptr += 1
+        return ret
+    # end haram
+        
+    def step(self, move_overwrite=None):
+        """
+        step forward. If move_overwrite is none, force that move instead.
+        """
+        cur_player = self.state.cur_player()
+        
+        # still in replay
+        if not self.exhausted_history():
+            # advance the hidden state if needed
+            if cur_player != pyhanabi.CHANCE_PLAYER_ID:
+                obs = self.state.observation(state.cur_player())
+                self.actors[cur_player].act(obs)
+            self.apply_move(self.read_next_history_item() if move_overwrite is None else move_overwrite)
+            
+        # out of replay
+        else:
+            if cur_player != pyhanabi.CHANCE_PLAYER_ID:
+                obs = self.state.observation(state.cur_player())
+                move = self.actors[cur_player].act(obs)
+                self.apply_move(move if move_overwrite is None else move_overwrite)
+            else:
+                if not self.exhausted_deck():
+                    card = self.read_next_card()
+                    self.state.deal_specific_card(player_id=self.deal_to, color=card.color(), rank=card.rank())
+                    
+    def terminal(self):
+        return self.state.is_terminal()
