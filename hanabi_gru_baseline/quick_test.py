@@ -16,4 +16,5 @@ for t in range(6):
     print(f"t={t} seat={obs['seat']} sum_legal={float(obs['legal_mask'].sum())} reward={r} done={done}")
     if done:
         obs = e.reset()
-        print("  (reset) seat:", obs["seat"], "sum_legal:", float(obs["legal_mask"].sum()))
+        print("  (reset) seat:", obs["seat"], "sum_legal:", float(obs["legal_mask"].
+        sum()))
