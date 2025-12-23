@@ -10,7 +10,7 @@ def make_game(players=2, seed=0):
         "max_life_tokens": 3,
         "random_start_player": False,
         "seed": seed,
-        "observation_type": pyhanabi.AgentObservationType.CARD_KNOWLEDGE.value,
+        "observation_type": pyhanabi.AgentObservationType.RICH_CARD_KNOWLEDGE.value,
     })
 
 def new_empty_state(game):
@@ -158,24 +158,35 @@ def run_test3():
     state = new_empty_state(game)
 
     # Use all 3 copies of R1: two in p0 (play + discard), one in p1 (visible).
-    hand0 = [("R",0), ("R",0), ("Y",0), ("B",0), ("W",0)]
+    hand0 = [("R",0), ("R",0), ("Y",0), ("B",0), ("R",1)]
     hand1 = [("R",0), ("Y",1), ("G",1), ("B",2), ("W",2)]
     deal_initial_hands(game, state, hand0, hand1)
 
+    print(f"player 0 sees: {(state.observation(0)).observed_hands()}")
+    print(f"player 1 sees: {(state.observation(1)).observed_hands()}")
+
     # p0 plays R1 (slot 0)
+    print("player 0 plays R1")
     state.apply_move(pyhanabi.HanabiMove.get_play_move(0))
     deal_missing_specific(game, state, "G", 2)  # deterministic refill (G3), NOT R1
 
+    print(f"player 0 sees: {(state.observation(0)).observed_hands()}")
+    print(f"player 1 sees: {(state.observation(1)).observed_hands()}")
+
     # p1 spends a token by hinting p0 (so p0 can discard)
+    print("player 1 hints R to player 0")
     assert state.cur_player() == 1
-    state.apply_move(pyhanabi.HanabiMove.get_reveal_color_move(1, pyhanabi.color_char_to_idx("Y")))  # p1->p0
+    state.apply_move(pyhanabi.HanabiMove.get_reveal_color_move(1, pyhanabi.color_char_to_idx("R")))  # p1->p0
+
+    print(f"player 0 sees: {(state.observation(0)).observed_hands()}")
+    print(f"player 1 sees: {(state.observation(1)).observed_hands()}")
 
     # p0 discards the remaining R1 (it should now be at slot 0)
+    print("player 0 discards R1")
     assert state.cur_player() == 0
     assert state.information_tokens() < game.max_information_tokens()
     state.apply_move(pyhanabi.HanabiMove.get_discard_move(0))
     deal_missing_specific(game, state, "W", 3)  # deterministic refill (W4), NOT R1
-
     # Verify required conditions
     fireworks = state.fireworks()
     assert fireworks[pyhanabi.color_char_to_idx("R")] == 1, fireworks
@@ -188,6 +199,11 @@ def run_test3():
 
     # New exact-pair masking check:
     assert_banned_in_p0_hand(game, obs0, "R", 0)
+
+    # print actual hands
+    print(f"player 0 sees: {(state.observation(0)).observed_hands()}")
+    print(f"player 1 sees: {(state.observation(1)).observed_hands()}")
+
     print("OK: R1 played + in partner + in discard, and R1 is banned from all p0 slots.")
 
 
