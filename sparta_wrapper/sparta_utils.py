@@ -6,8 +6,7 @@ Implements:
  
 """
 
-
-
+import random
 from hanabi_learning_environment import pyhanabi
 from sparta_wrapper.hanabi_utils import unserialize, unmask_card
 from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
@@ -75,3 +74,35 @@ def fabricate_history(state, guesser_id, guessed_hand):
         fabricated_history.append(unserialize(serialized))
         
     return fabricated_history
+
+def consistent_hand_sampler(state, obs, colors=HANABI_GAME_CONFIG["colors"], ranks=HANABI_GAME_CONFIG["ranks"], hand_size=HANABI_GAME_CONFIG["hand_size"]):
+    """
+    get the sampler function
+    """
+    this_player = obs.get_player()
+    # god knows why this thing is relative-indexed
+    card_knowledge = obs.card_knowledge()[0]
+    
+    cards = []
+    
+    for color in range(colors):
+        for rank in range(ranks):
+            counts = state.card_count_from_perspective(color=color, rank=rank, player=this_player)
+            for _ in range(counts):
+                cards.append(pyhanabi.HanabiCard(color, rank))
+    
+    slots = [[] for _ in range(hand_size)]
+    
+                
+    for i, card in enumerate(cards):
+        for j in range(hand_size):
+            if card_knowledge[j].color_plausible(card.color()) and card_knowledge[j].rank_plausible(card.rank()):
+                slots[j].append(i)
+        
+    def sample(hand_size=HANABI_GAME_CONFIG["hand_size"]):
+        while True:
+            sampled = [random.choice(slot) for slot in slots]
+            if len(set(sampled)) == len(sampled):
+                return [cards[i] for i in sampled]
+    
+    return sample

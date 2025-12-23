@@ -50,6 +50,12 @@ def fabricate_test1():
     fabricated_history = fabricate_history(state, guesser_id, guessed_hand)
     for move in fabricated_history:
         print(move.to_dict())
+        
+    print(state)
+    obs = state.observation(1)
+    sample = consistent_hand_sampler(state, obs)
+    for _ in range(100):
+        print(sample())
 
 
 if __name__ == "__main__":
