@@ -60,8 +60,8 @@ def squid_game(seed):
     
     print("checking consistency with fabricated history...")
     
-    sample = consistent_hand_sampler(state, state.observation(1))
-    samples = [sample() for _ in range(10)]
+    sampler = consistent_hand_sampler(state, state.observation(1))
+    samples = [sampler() for _ in range(10)]
     
     for hand_guess in samples:
         is_consistent = check_consistent_with_partner_move(
@@ -70,6 +70,9 @@ def squid_game(seed):
             act
         )
         print(f"Guessed hand: {[str(card) for card in hand_guess]}, Consistent with partner's move: {is_consistent}")
+        
+    for hand in sample(state, state.observation(1), signal_blueprint_factory, act, num_samples=5, max_attempts=50):
+        print(hand) 
 
 if __name__ == "__main__":
     squid_game(67)

@@ -181,7 +181,35 @@ class SimulatedGame:
         return self.state.is_terminal()
     
 def check_consistent_with_partner_move(fabricated_history, actor_blueprint, partner_last_move):
+    """
+    Check if the fabricated history is consistent with the partner's last move.
+    """
     game = SimulatedGame(history=fabricated_history, set_deck=[], actor_blueprint=actor_blueprint)
     while not game.exhausted_history():
         game.step()
     return game.last_player_move_serialized == partner_last_move.to_dict()
+
+def sample(state, obs, actor_blueprint, partner_last_move, num_samples, max_attempts):
+    """
+    Sample a hand for the guessing player that is consistent with their observation
+    """
+    guesser_id = obs.get_player()
+    sampler = consistent_hand_sampler(state=state, obs=obs)
+    
+    accepted_hands = []
+    
+    for _ in range(max_attempts):
+        guessed_hand = sampler()
+        if check_consistent_with_partner_move(
+            fabricated_history=fabricate_history(state=state, guesser_id=guesser_id, guessed_hand=guessed_hand),
+            actor_blueprint=actor_blueprint,
+            partner_last_move=partner_last_move
+        ):
+            accepted_hands.append(guessed_hand)
+            if len(accepted_hands) >= num_samples:
+                break
+    
+    while len(accepted_hands) < num_samples:
+        accepted_hands.append(sampler())
+    
+    return accepted_hands
