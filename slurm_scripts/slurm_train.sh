@@ -4,7 +4,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=16G
-#SBATCH --time=1:00:00
+#SBATCH --time=6:00:00
 #SBATCH -p mit_normal_gpu
 #SBATCH -G 1
 
@@ -28,7 +28,7 @@ conda activate hanabi
 # -----------------------------------------------------------------------------
 # Hyperparameters (same overrides as your nohup script)
 # -----------------------------------------------------------------------------
-TS="${TS:-$(date +"%Y%m%d_%H%M%S")}"
+TS="${TS:-${SLURM_JOB_ID:-$(date +%Y%m%d_%H%M%S)}}"
 DEVICE="${DEVICE:-cuda}"
 TOTAL_UPDATES="${TOTAL_UPDATES:-50000}"
 LR="${LR:-1e-4}"
