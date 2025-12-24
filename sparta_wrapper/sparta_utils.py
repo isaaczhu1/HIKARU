@@ -121,6 +121,8 @@ class SimulatedGame:
         self.actors = [actor_blueprint() for _ in range(hanabi_game_config["players"])]
         self.peak_score = 0
         
+        self.last_player_move_serialized = None
+        
     def apply_move(self, move):
         if move.type() in [pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD]:
             self.deal_to = self.state.cur_player()   # acting player
@@ -160,7 +162,8 @@ class SimulatedGame:
             # advance the hidden state if needed
             if cur_player != pyhanabi.CHANCE_PLAYER_ID:
                 obs = self.state.observation(self.state.cur_player())
-                self.actors[cur_player].act(obs)
+                act = self.actors[cur_player].act(obs)
+                self.last_player_move_serialized = act.to_dict()
             self.apply_move(self.read_next_history_item() if move_overwrite is None else move_overwrite)
             
         # out of replay
@@ -176,3 +179,9 @@ class SimulatedGame:
                     
     def terminal(self):
         return self.state.is_terminal()
+    
+def check_consistent_with_partner_move(fabricated_history, actor_blueprint, partner_last_move):
+    game = SimulatedGame(history=fabricated_history, set_deck=[], actor_blueprint=actor_blueprint)
+    while not game.exhausted_history():
+        game.step()
+    return game.last_player_move_serialized == partner_last_move.to_dict()
