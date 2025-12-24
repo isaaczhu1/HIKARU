@@ -45,3 +45,5 @@ class CFG:
         max_information_tokens = 8
         max_life_tokens = 3
         random_start_player = False
+        # 0=MINIMAL, 1=CARD_KNOWLEDGE, 2=SEER, 3=RICH_CARD_KNOWLEDGE
+        observation_type = 3

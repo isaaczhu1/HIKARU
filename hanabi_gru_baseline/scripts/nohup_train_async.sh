@@ -6,7 +6,7 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 DEVICE="${DEVICE:-cuda}"
 TOTAL_UPDATES="${TOTAL_UPDATES:-50000}"
-LR="${LR:-3e-5}"
+LR="${LR:-1e-4}"
 LR_FINAL="${LR_FINAL:-3e-5}"
 CKPT="${CKPT:-}"
 SAVE_DIR="${SAVE_DIR:-runs/hanabi_async}"
@@ -18,9 +18,9 @@ SEQ_LEN="${SEQ_LEN:-}"      # optional PPO seq_len override
 START_UPDATE="${START_UPDATE:-}" # optional override for starting update counter
 
 # Additional config visibility (defined in config.py; change there to affect runs)
-SEED="${SEED:-67}"
+SEED="${SEED:-0}"
 UNROLL_T="${UNROLL_T:-128}"
-OBS_MODE="${OBS_MODE:-minimal}"
+OBS_MODE="${OBS_MODE:-rich_card_knowledge}"
 LOG_INTERVAL="${LOG_INTERVAL:-10}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-2000}"
 

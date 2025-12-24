@@ -10,6 +10,7 @@ import argparse
 import numpy as np
 import torch
 
+from hanabi_learning_environment import pyhanabi
 from config import CFG
 from hanabi_envs import HanabiEnv2P, HanabiVecEnvSync
 from model import HanabiGRUPolicy
@@ -39,7 +40,7 @@ def parse_args():
                     help="override PPO sequence length (for BPTT); default from config")
     ap.add_argument("--num-envs", type=int, default=None, help="override number of parallel envs")
     ap.add_argument("--unroll-T", type=int, default=None, help="override rollout length per update")
-    ap.add_argument("--obs-mode", type=str, default=None, help="override observation mode")
+    ap.add_argument("--obs-mode", type=str, default=None, choices=["minimal", "card_knowledge", "seer", "rich_card_knowledge"], help="Observation mode: maps to pyhanabi AgentObservationType")
     ap.add_argument("--save-interval", type=int, default=None, help="checkpoint interval (updates)")
     ap.add_argument("--log-interval", type=int, default=None, help="logging interval (updates)")
     ap.add_argument("--seed", type=int, default=None, help="override base seed")
@@ -183,6 +184,7 @@ def run_eval(net, cfg, device, n_episodes=16, greedy=True):
         max_information_tokens=cfg.hanabi.max_information_tokens,
         max_life_tokens=cfg.hanabi.max_life_tokens,
         random_start_player=cfg.hanabi.random_start_player,
+        observation_type=cfg.hanabi.observation_type,
     )
 
     scores = []
@@ -265,9 +267,30 @@ def main(cfg: CFG, args):
     max_score = int(cfg.hanabi.colors * cfg.hanabi.ranks)
     print(f"[info] Hanabi {cfg.hanabi.colors}x{cfg.hanabi.ranks}, max score = {max_score}")
 
+
+
+
+    OBS_MODE_TO_TYPE = {
+        "minimal": pyhanabi.AgentObservationType.MINIMAL.value,                 # 0
+        "card_knowledge": pyhanabi.AgentObservationType.CARD_KNOWLEDGE.value,   # 1
+        "seer": pyhanabi.AgentObservationType.SEER.value,                       # 2
+        "rich_card_knowledge": pyhanabi.AgentObservationType.RICH_CARD_KNOWLEDGE.value,  # 3
+    }
+
+    if cfg.obs_mode is not None:
+        key = str(cfg.obs_mode).lower()
+        if key not in OBS_MODE_TO_TYPE:
+            raise ValueError(f"Unknown obs_mode={cfg.obs_mode}. Choices: {sorted(OBS_MODE_TO_TYPE)}")
+        cfg.hanabi.observation_type = OBS_MODE_TO_TYPE[key]
+
+    print(f"[info] obs_mode={cfg.obs_mode} -> observation_type={cfg.hanabi.observation_type}")
+
+
+
     # ---------- Environments ---------- #
     env = make_vec_env(cfg.num_envs, cfg.seed, hanabi_cfg=cfg.hanabi)
     obs_dict = env.reset_all(seed0=cfg.seed)
+    print("[info] cfg.hanabi.observation_type =", cfg.hanabi.observation_type)
     print("[debug] initial legal sums:", obs_dict["legal_mask"].sum(axis=1)[:8])
 
     # ---------- TensorBoard logging ---------- #

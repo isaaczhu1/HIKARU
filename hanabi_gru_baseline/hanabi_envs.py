@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 import numpy as np
 from hanabi_learning_environment import rl_env
+from hanabi_learning_environment import pyhanabi
 
 _DEBUG = bool(int(os.environ.get("HANABI_DEBUG", "0")))
 
@@ -40,6 +41,7 @@ class HanabiEnv2P:
         max_information_tokens: int = 8,
         max_life_tokens: int = 3,
         random_start_player: bool = False,
+        observation_type: int = pyhanabi.AgentObservationType.CARD_KNOWLEDGE.value,
     ):
         self.players = players
         self.colors = colors
@@ -57,8 +59,12 @@ class HanabiEnv2P:
                 "max_life_tokens": max_life_tokens,
                 "random_start_player": random_start_player,
                 "seed": seed,
+                "observation_type": observation_type,
             }
         )
+        # quick check that we got the correct obs configuration
+        got = int(self._env.game.observation_type().value)
+        assert got == int(observation_type), f"expected observation_type={observation_type}, got {got}"
 
         # Probe vectorized obs length once to set a stable obs_dim
         self.obs_dim = 1
@@ -319,6 +325,7 @@ class HanabiVecEnvSync:
                 max_information_tokens=hanabi_cfg.max_information_tokens,
                 max_life_tokens=hanabi_cfg.max_life_tokens,
                 random_start_player=hanabi_cfg.random_start_player,
+                observation_type=hanabi_cfg.observation_type,
             )
             for i in range(n_envs)
         ]
