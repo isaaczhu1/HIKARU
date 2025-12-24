@@ -131,9 +131,10 @@ class SimulatedGame:
         
     def apply_move(self, move):
         if move.type() in [pyhanabi.HanabiMoveType.PLAY, pyhanabi.HanabiMoveType.DISCARD]:
-            self.deal_to = move.player()
+            self.deal_to = self.state.cur_player()   # acting player
         self.state.apply_move(move)
         self.peak_score = max(self.peak_score, self.state.score())
+
     
     # begin haram
     def exhausted_history(self):
@@ -166,14 +167,14 @@ class SimulatedGame:
         if not self.exhausted_history():
             # advance the hidden state if needed
             if cur_player != pyhanabi.CHANCE_PLAYER_ID:
-                obs = self.state.observation(state.cur_player())
+                obs = self.state.observation(self.state.cur_player())
                 self.actors[cur_player].act(obs)
             self.apply_move(self.read_next_history_item() if move_overwrite is None else move_overwrite)
             
         # out of replay
         else:
             if cur_player != pyhanabi.CHANCE_PLAYER_ID:
-                obs = self.state.observation(state.cur_player())
+                obs = self.state.observation(self.state.cur_player())
                 move = self.actors[cur_player].act(obs)
                 self.apply_move(move if move_overwrite is None else move_overwrite)
             else:
