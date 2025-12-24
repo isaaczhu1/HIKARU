@@ -22,7 +22,10 @@ def evaluate_gru_blueprint(ckpt_path, episodes):
 
     from tqdm import tqdm
     for _ in tqdm(range(episodes)):
-        game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
+        cfg = HANABI_GAME_CONFIG
+        cfg['seed'] = 67
+        
+        game = pyhanabi.HanabiGame(cfg)
         state = game.new_initial_state()
         
         # skip initial deal phase
@@ -31,13 +34,11 @@ def evaluate_gru_blueprint(ckpt_path, episodes):
         
         p0_guess = consistent_hand_sampler(state=state, obs=state.observation(0))()
         
-        print(p0_guess)
-        
         fabricated_history = fabricate_history(state, 0, p0_guess)
         
-        print(fabricated_history)
-        
-        set_deck = remaining_deck(state)
+        set_deck = remaining_deck(state, 0)
+        for card in p0_guess:
+            set_deck.remove(card)
         random.shuffle(set_deck)
         
         simulator = SimulatedGame(fabricated_history, set_deck, blueprint_factory)

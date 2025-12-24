@@ -75,11 +75,11 @@ def fabricate_history(state, guesser_id, guessed_hand):
         
     return fabricated_history
 
-def remaining_deck(state, colors=HANABI_GAME_CONFIG["colors"], ranks=HANABI_GAME_CONFIG["ranks"]):
+def remaining_deck(state, player, colors=HANABI_GAME_CONFIG["colors"], ranks=HANABI_GAME_CONFIG["ranks"]):
     cards = []
     for color in range(colors):
         for rank in range(ranks):
-            counts = state.card_count(color=color, rank=rank)
+            counts = state.card_count_from_perspective(color=color, rank=rank, player=player)
             for _ in range(counts):
                 cards.append(pyhanabi.HanabiCard(color=color, rank=rank))
     return cards
@@ -92,16 +92,8 @@ def consistent_hand_sampler(state, obs, colors=HANABI_GAME_CONFIG["colors"], ran
     # god knows why this thing is relative-indexed
     card_knowledge = obs.card_knowledge()[0]
     
-    cards = []
-    
-    for color in range(colors):
-        for rank in range(ranks):
-            counts = state.card_count_from_perspective(color=color, rank=rank, player=this_player)
-            for _ in range(counts):
-                cards.append(pyhanabi.HanabiCard(color, rank))
-    
+    cards = remaining_deck(state=state, player=this_player, colors=colors, ranks=ranks)    
     slots = [[] for _ in range(hand_size)]
-    
                 
     for i, card in enumerate(cards):
         for j in range(hand_size):
