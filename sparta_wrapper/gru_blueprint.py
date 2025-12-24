@@ -71,7 +71,7 @@ class GRUBlueprint:
         masked = logits.masked_fill(legal_mask.squeeze(0) < 0.5, very_neg)
         return masked
         
-    def act(self, obs, state):
+    def act(self, obs, state=None):
         """
         return the move from logits
         """

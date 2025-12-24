@@ -41,9 +41,7 @@ class SpartaAgent:
     def act(self, obs: pyhanabi.HanabiObservation, state: pyhanabi.HanabiState) -> pyhanabi.HanabiMove:
         blueprint_move = self.blueprint.act(obs, state)
         legal_moves = obs.legal_moves()
-        print(obs)
-        print(legal_moves)
-
+        
         alternate_choices = random.sample(legal_moves, min(self.sparta_config["search_width"], len(legal_moves)))
         choices = alternate_choices + [blueprint_move]
         
@@ -66,8 +64,6 @@ class SpartaAgent:
         to_act = blueprint_move
         for move in alternate_choices:
             if t(evaluations[move], evaluations[blueprint_move]) > self.sparta_config["t_threshold"]:
-                print("Sparta move!")
-                print(obs, move, evaluations[move], evaluations[blueprint_move])
                 to_act = move
     
         return to_act
