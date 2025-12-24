@@ -7,3 +7,4 @@ debug_log.txt
 debug_log2.txt
 debug3.txt
 miniconda.sh
+slurm_outputs/
