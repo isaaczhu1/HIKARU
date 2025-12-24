@@ -110,7 +110,7 @@ def consistent_hand_sampler(state, obs, colors=HANABI_GAME_CONFIG["colors"], ran
     return sample
 
 class SimulatedGame:
-    def __init__(self, history, set_deck, actor_blueprints, hanabi_game_config=HANABI_GAME_CONFIG, actors=None):
+    def __init__(self, history, set_deck, actor_blueprints, hanabi_game_config=HANABI_GAME_CONFIG):
         self.history = history
         self.game = pyhanabi.HanabiGame(hanabi_game_config)
         self.state = self.game.new_initial_state()
@@ -174,7 +174,9 @@ class SimulatedGame:
                 move = self.actors[cur_player].act(obs, self.state)
                 self.apply_move(move if move_overwrite is None else move_overwrite)
             else:
-                if not self.exhausted_deck():
+                if self.set_deck is None:
+                    self.state.deal_random_card()
+                elif not self.exhausted_deck():
                     card = self.read_next_card()
                     self.state.deal_specific_card(player_id=self.deal_to, color=card.color(), rank=card.rank())
                     

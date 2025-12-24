@@ -5,7 +5,6 @@ HANABI_GAME_CONFIG = {
     "hand_size": 5,
     "max_information_tokens": 8,
     "max_life_tokens": 3,
-    "seed": 67,
 }
 
 DEVICE = "cuda"

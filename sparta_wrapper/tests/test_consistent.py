@@ -49,6 +49,7 @@ def squid_game(seed):
         
     print(state)
     
+    print(state.observation(state.cur_player()).legal_moves())
     act = signal_blueprint_factory().act(state.observation(state.cur_player()), None)
     print(act)
     
@@ -57,6 +58,7 @@ def squid_game(seed):
         state.deal_random_card()
         
     print(state)
+    print(state.observation(state.cur_player()).legal_moves())
     
     for hand in sample(state, state.observation(1), signal_blueprint_factory, num_samples=5, max_attempts=50):
         print(hand) 

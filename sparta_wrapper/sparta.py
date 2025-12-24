@@ -8,10 +8,41 @@ class SpartaAgent:
         self.hanabi_cfg = hanabi_cfg
         self.sparta_config = sparta_config
 
+    def _evaluate_move(self, state, obs, samples, set_decks, move):
+        rewards = []
+        
+        for sample_hand, deck in zip(samples, set_decks):
+            game = SimulatedGame(
+                history=fabricate_history(
+                    state=state,
+                    guesser_id=obs.get_player(),
+                    guessed_hand=sample_hand
+                ),
+                set_deck=deck,
+                actor_blueprints=[lambda: self.blueprint for _ in range(self.hanabi_cfg["players"])],
+                hanabi_game_config=self.hanabi_cfg
+            )
+            
+            # advance fabricated steps
+            while not game.exhausted_history():
+                game.step()
+                
+            # apply the given move
+            game.step(move_overwrite=move)
+            
+            # continue to end
+            while not game.terminal():
+                game.step()
+                
+            rewards.append(game.peak_score)
+
+        return rewards
+
     def act(self, obs: pyhanabi.HanabiObservation, state: pyhanabi.HanabiState) -> pyhanabi.HanabiMove:
-        blueprint_move = self.blueprint.act(obs)
+        blueprint_move = self.blueprint.act(obs, state)
         legal_moves = obs.legal_moves()
-        legal_moves.remove(blueprint_move)
+        print(obs)
+        print(legal_moves)
 
         alternate_choices = random.sample(legal_moves, min(self.sparta_config["search_width"], len(legal_moves)))
         choices = alternate_choices + [blueprint_move]
@@ -30,41 +61,13 @@ class SpartaAgent:
                 deck.remove(card)
             deck = random.shuffle(deck)
             
-        evaluations = {move : _evaluate_move(state, obs, samples, set_decks, move) for move in choices}
+        evaluations = {move : self._evaluate_move(state, obs, samples, set_decks, move) for move in choices}
         
         to_act = blueprint_move
         for move in alternate_choices:
             if t(evaluations[move], evaluations[blueprint_move]) > self.sparta_config["t_threshold"]:
+                print("Sparta move!")
+                print(obs, move, evaluations[move], evaluations[blueprint_move])
                 to_act = move
-        
+    
         return to_act
-
-    def _evaluate_move(self, state, obs, samples, set_decks, move):
-        rewards = []
-        
-        for sample_hand, deck in zip(samples, set_decks):
-            game = SimulatedGame(
-                history=fabricate_history(
-                    state=state,
-                    guesser_id=obs.get_player(),
-                    guessed_hand=sample_hand
-                ),
-                set_deck=deck,
-                actor_blueprint=lambda: self.blueprint,
-                hanabi_game_config=self.hanabi_cfg
-            )
-            
-            # advance fabricated steps
-            while not game.exhausted_history():
-                game.step()
-                
-            # apply the given move
-            game.step(move_overwrite=move)
-            
-            # continue to end
-            while not game.terminal():
-                game.step()
-                
-            rewards.append(game.peak_score)
-
-        return rewards
