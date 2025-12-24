@@ -7,6 +7,7 @@ Implements:
 """
 
 import random
+import numpy as np
 from hanabi_learning_environment import pyhanabi
 from sparta_wrapper.hanabi_utils import unserialize, unmask_card
 from sparta_wrapper.sparta_config import HANABI_GAME_CONFIG
@@ -109,7 +110,7 @@ def consistent_hand_sampler(state, obs, colors=HANABI_GAME_CONFIG["colors"], ran
     return sample
 
 class SimulatedGame:
-    def __init__(self, history, set_deck, actor_blueprint, hanabi_game_config=HANABI_GAME_CONFIG):
+    def __init__(self, history, set_deck, actor_blueprints, hanabi_game_config=HANABI_GAME_CONFIG, actors=None):
         self.history = history
         self.game = pyhanabi.HanabiGame(hanabi_game_config)
         self.state = self.game.new_initial_state()
@@ -118,7 +119,7 @@ class SimulatedGame:
         self.deck_ptr = 0
         
         self.deal_to = None
-        self.actors = [actor_blueprint() for _ in range(hanabi_game_config["players"])]
+        self.actors = [actor_blueprint() for actor_blueprint in actor_blueprints]
         self.peak_score = 0
         
         self.last_player_move_serialized = None
@@ -162,7 +163,7 @@ class SimulatedGame:
             # advance the hidden state if needed
             if cur_player != pyhanabi.CHANCE_PLAYER_ID:
                 obs = self.state.observation(self.state.cur_player())
-                act = self.actors[cur_player].act(obs)
+                act = self.actors[cur_player].act(obs, self.state)
                 self.last_player_move_serialized = act.to_dict()
             self.apply_move(self.read_next_history_item() if move_overwrite is None else move_overwrite)
             
@@ -170,7 +171,7 @@ class SimulatedGame:
         else:
             if cur_player != pyhanabi.CHANCE_PLAYER_ID:
                 obs = self.state.observation(self.state.cur_player())
-                move = self.actors[cur_player].act(obs)
+                move = self.actors[cur_player].act(obs, self.state)
                 self.apply_move(move if move_overwrite is None else move_overwrite)
             else:
                 if not self.exhausted_deck():
@@ -180,29 +181,44 @@ class SimulatedGame:
     def terminal(self):
         return self.state.is_terminal()
     
-def check_consistent_with_partner_move(fabricated_history, actor_blueprint, partner_last_move):
+def check_consistent_with_partner_move(fabricated_history, actor_blueprints, partner_last_move):
     """
     Check if the fabricated history is consistent with the partner's last move.
     """
-    game = SimulatedGame(history=fabricated_history, set_deck=[], actor_blueprint=actor_blueprint)
+    game = SimulatedGame(history=fabricated_history, set_deck=[], actor_blueprints=actor_blueprints)
     while not game.exhausted_history():
         game.step()
+    if partner_last_move is None:
+        return game.last_player_move_serialized is None
     return game.last_player_move_serialized == partner_last_move.to_dict()
 
-def sample(state, obs, actor_blueprint, partner_last_move, num_samples, max_attempts):
+def sample(state, obs, actor_blueprint, num_samples, max_attempts, hanabi_cfg=HANABI_GAME_CONFIG):
     """
     Sample a hand for the guessing player that is consistent with their observation
     """
     guesser_id = obs.get_player()
     sampler = consistent_hand_sampler(state=state, obs=obs)
     
+    # get last move
+    partner_last_move = None
+    for item in obs.last_moves():
+        pid = item.player()
+        move_dict = item.move().to_dict()
+        if pid is None or move_dict is None:
+            continue
+        if pid == 0 or pid == pyhanabi.CHANCE_PLAYER_ID:
+            continue
+        partner_last_move = item.move()
+        break
+    
+    # rejection sampling
     accepted_hands = []
     
     for _ in range(max_attempts):
         guessed_hand = sampler()
         if check_consistent_with_partner_move(
             fabricated_history=fabricate_history(state=state, guesser_id=guesser_id, guessed_hand=guessed_hand),
-            actor_blueprint=actor_blueprint,
+            actor_blueprints=[actor_blueprint for _ in range(hanabi_cfg["players"])],
             partner_last_move=partner_last_move
         ):
             accepted_hands.append(guessed_hand)
@@ -213,3 +229,7 @@ def sample(state, obs, actor_blueprint, partner_last_move, num_samples, max_atte
         accepted_hands.append(sampler())
     
     return accepted_hands
+
+def t(a, b, eps=0.01):
+    diffs = np.array(a) - np.array(b)
+    return np.mean(diffs) / (np.std(diffs) + eps) * np.sqrt(diffs.shape[0]) 

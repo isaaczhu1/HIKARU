@@ -15,7 +15,7 @@ import torch
 class SignalBlueprint:
     """Signal by looking at the next player's first card."""
 
-    def act(self, observation: pyhanabi.HanabiObservation) -> pyhanabi.HanabiMove:
+    def act(self, observation: pyhanabi.HanabiObservation, state) -> pyhanabi.HanabiMove:
         partner_hand = observation.observed_hands()[1]
         if not partner_hand:
             return observation.legal_moves()[0]
@@ -49,7 +49,7 @@ def squid_game(seed):
         
     print(state)
     
-    act = signal_blueprint_factory().act(state.observation(state.cur_player()))
+    act = signal_blueprint_factory().act(state.observation(state.cur_player()), None)
     print(act)
     
     state.apply_move(act)
@@ -58,20 +58,7 @@ def squid_game(seed):
         
     print(state)
     
-    print("checking consistency with fabricated history...")
-    
-    sampler = consistent_hand_sampler(state, state.observation(1))
-    samples = [sampler() for _ in range(10)]
-    
-    for hand_guess in samples:
-        is_consistent = check_consistent_with_partner_move(
-            fabricate_history(state, 1, hand_guess),
-            signal_blueprint_factory,
-            act
-        )
-        print(f"Guessed hand: {[str(card) for card in hand_guess]}, Consistent with partner's move: {is_consistent}")
-        
-    for hand in sample(state, state.observation(1), signal_blueprint_factory, act, num_samples=5, max_attempts=50):
+    for hand in sample(state, state.observation(1), signal_blueprint_factory, num_samples=5, max_attempts=50):
         print(hand) 
 
 if __name__ == "__main__":

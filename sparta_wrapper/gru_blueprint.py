@@ -29,7 +29,7 @@ class GRUBlueprint:
         self._h = self.shared_model.initial_state()
         self._encoder_cache = {}
         
-    def logits(self, obs, prev_self_action=None):
+    def logits(self, obs, state, prev_self_action=None):
         """Select an action for the current player given HanabiObservation."""
         obs_vec = self._encode_vectorized_observation(obs)
 

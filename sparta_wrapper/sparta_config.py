@@ -13,9 +13,8 @@ DEVICE = "cuda"
 CKPT_PATH = "gru_checkpoints/ckpt_020000.pt"
 
 SPARTA_CONFIG = {
-    "num_rollouts": 16,
-    "epsilon": 0.05,
-    "rng_seed": 0,
+    "num_rollouts": 20,
+    "t_threshold": 2,
 
     # number of moves to look at 
     "search_width": 3,
