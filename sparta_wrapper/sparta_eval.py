@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 import sys
 from typing import Callable, List
+from tqdm import tqdm
 
 print("importing torch")
 import torch
@@ -70,23 +71,28 @@ def _render_step(step: int, pid: int, action_dict, state: pyhanabi.HanabiState) 
         print(line, flush=True)
 
 
-def run_episode(seed: int, ckpt_path: Path, deviator = 0, render: bool = True) -> float:
-    
+def run_episode(seed: int, ckpt_path: Path, deviator = None, render: bool = True) -> float:
     print("Running episode with seed", seed, "for ckpt", ckpt_path)
     random.seed(seed)
     torch.manual_seed(seed)
     
     actor_blueprints = [lambda: GRUBlueprint(ckpt_path, GRU_CFG, HANABI_GAME_CONFIG) for i in range(HANABI_GAME_CONFIG["players"])]
-    actor_blueprints[deviator] = lambda: SpartaAgent(GRUBlueprint(ckpt_path, GRU_CFG, HANABI_GAME_CONFIG), HANABI_GAME_CONFIG, SPARTA_CONFIG)
+
+    if deviator is not None: # deviator is None <-> no sparta
+        actor_blueprints[deviator] = lambda: SpartaAgent(GRUBlueprint(ckpt_path, GRU_CFG, HANABI_GAME_CONFIG), HANABI_GAME_CONFIG, SPARTA_CONFIG)
+
+    seeded_game_config = dict(HANABI_GAME_CONFIG)
+    seeded_game_config["seed"] = seed
+    seeded_game_config["random_start_player"] = False # just in case
     
-    _game = pyhanabi.HanabiGame(HANABI_GAME_CONFIG)
-    _state = _game.new_initial_state()
+    # _game = pyhanabi.HanabiGame(seeded_game_config) # wut
+    # _state = _game.new_initial_state()
     
     game = SimulatedGame(
         history=[], 
         set_deck=None, 
         actor_blueprints=actor_blueprints, 
-        hanabi_game_config=HANABI_GAME_CONFIG
+        hanabi_game_config=seeded_game_config
     )
     
     while not game.terminal():
@@ -110,15 +116,29 @@ def main() -> None:
     if not ckpt_path.is_file():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
-    scores = []
-    from tqdm import tqdm
+    baseline_scores = []
+    
+    print(f"====== Running non-SPARTA evaluation over {args.episodes} episodes ======", flush=True)
     for ep in tqdm(range(args.episodes)):
-        seed = args.seed + ep
-        score = run_episode(seed, ckpt_path, render=not args.quiet)
-        scores.append(score)
+        manual_seed = args.seed + ep
+        score = run_episode(seed=manual_seed, ckpt_path=ckpt_path, deviator=None, render=(not args.quiet))
+        baseline_scores.append(score)
 
-    mean_score = sum(scores) / len(scores)
-    print(f"\nSPARTA mean score over {args.episodes} episodes: {mean_score:.3f}", flush=True)
+    print(f"Baseline scores: {baseline_scores}", flush=True)
+
+    print(f"====== Running SPARTA evaluation over {args.episodes} episodes ======", flush=True)
+    sparta_scores = []
+    for ep in tqdm(range(args.episodes)):
+        manual_seed = args.seed + ep
+        deviator = 0 # for now, player 0 is always the SPARTA agent
+        score = run_episode(seed=manual_seed, ckpt_path=ckpt_path, deviator=deviator, render=(not args.quiet))
+        sparta_scores.append(score)
+
+    print(f"SPARTA scores: {sparta_scores}", flush=True)
+
+    pointwise_diffs = [s - b for s, b in zip(sparta_scores, baseline_scores)]
+    print(f"Pointwise score differences (SPARTA - Baseline): {pointwise_diffs}", flush=True)
+
 
 
 if __name__ == "__main__":
